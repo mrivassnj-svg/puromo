@@ -1,0 +1,2016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Puromo プロモ — Handheld 3D Shell Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0f14;--surface:#151821;--card:#1c2030;--border:#2a2f42;
+  --accent:#4f8ef7;--accent2:#7c5cd8;--green:#22c55e;--red:#ef4444;
+  --yellow:#f59e0b;--text:#e2e8f0;--muted:#8892a4;--font:'Segoe UI',system-ui,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;display:flex;flex-direction:column}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;
+  display:flex;align-items:center;gap:14px;flex-shrink:0}
+header h1{font-size:1.2rem;font-weight:700}
+header .badge{color:var(--accent);font-size:.8rem;background:rgba(79,142,247,.1);
+  padding:3px 10px;border-radius:12px;border:1px solid rgba(79,142,247,.3)}
+.layout{display:grid;grid-template-columns:300px 1fr;flex:1;min-height:0;overflow:hidden}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);
+  overflow-y:auto;display:flex;flex-direction:column;gap:0}
+.sb-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+.sb-section h4{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.7px;
+  color:var(--muted);margin-bottom:10px}
+.main{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);overflow-x:auto}
+.tab{padding:10px 16px;cursor:pointer;font-size:.82rem;border-bottom:2px solid transparent;
+  color:var(--muted);white-space:nowrap;transition:all .15s;user-select:none}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(79,142,247,.05)}
+.tab-pane{flex:1;overflow-y:auto;padding:18px}
+label{font-size:.78rem;color:var(--muted);display:block;margin-bottom:4px;margin-top:9px}
+label:first-child{margin-top:0}
+input,select,textarea{width:100%;background:#0a0c12;border:1px solid var(--border);
+  border-radius:5px;color:var(--text);padding:7px 10px;font-size:.82rem;outline:none;font-family:var(--font)}
+input:focus,select:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:70px;font-size:.75rem;font-family:monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:6px;
+  border:none;cursor:pointer;font-size:.8rem;font-weight:600;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:#3a7de8}
+.btn-secondary{background:var(--border);color:var(--text)}.btn-secondary:hover{background:#35394d}
+.btn-green{background:var(--green);color:#fff}.btn-green:hover{background:#16a34a}
+.btn-purple{background:var(--accent2);color:#fff}.btn-purple:hover{background:#6b4fc3}
+.btn-red{background:var(--red);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
+.card:last-child{margin-bottom:0}
+.card h3{font-size:.82rem;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.7px;margin-bottom:12px}
+.tag{display:inline-block;padding:2px 7px;border-radius:9px;font-size:.7rem;font-weight:600}
+.tag-blue{background:rgba(79,142,247,.15);color:var(--accent)}
+.tag-green{background:rgba(34,197,94,.15);color:var(--green)}
+.tag-red{background:rgba(239,68,68,.15);color:var(--red)}
+.tag-yellow{background:rgba(245,158,11,.15);color:var(--yellow)}
+.tag-purple{background:rgba(124,92,216,.15);color:var(--accent2)}
+.kv{font-size:.8rem;display:grid;grid-template-columns:auto 1fr;gap:3px 12px}
+.kv-k{color:var(--muted);white-space:nowrap}
+.kv-v{font-family:monospace;font-weight:600;overflow-wrap:anywhere}
+table.dt{width:100%;border-collapse:collapse;font-size:.78rem}
+table.dt th{text-align:left;padding:6px 8px;background:var(--surface);color:var(--muted);
+  font-size:.72rem;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)}
+table.dt td{padding:6px 8px;border-bottom:1px solid #1e2335}
+table.dt tr:last-child td{border-bottom:none}
+table.dt tr:hover td{background:rgba(79,142,247,.04)}
+.wire-dot{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:middle;margin-right:6px;border:1px solid rgba(255,255,255,.2)}
+.safety-item{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border);font-size:.79rem}
+.safety-item:last-child{border-bottom:none}
+.safety-icon{flex-shrink:0;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700}
+.safety-critical{background:rgba(239,68,68,.2);color:var(--red)}
+.safety-verify{background:rgba(245,158,11,.2);color:var(--yellow)}
+#viewport{width:100%;background:#070a0f;border-radius:8px;cursor:grab;display:block;min-height:360px}
+#viewport:active{cursor:grabbing}
+.colour-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.colour-swatch{width:100%;aspect-ratio:1;border-radius:6px;border:2px solid transparent;
+  cursor:pointer;transition:all .15s}
+.colour-swatch.active{border-color:#fff;transform:scale(1.1)}
+.colour-swatch:hover{transform:scale(1.05)}
+.part-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}
+.part-row:last-child{border-bottom:none}
+.part-name{font-size:.8rem;font-weight:600}
+.gpio-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;font-size:.72rem}
+.gpio-pin{display:flex;align-items:center;gap:5px;padding:4px 7px;border-radius:4px;background:var(--surface);border:1px solid var(--border)}
+.gpio-pin.claimed{border-color:transparent}
+.gpio-num{font-family:monospace;color:var(--muted);min-width:22px}
+.gpio-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conflict-item{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:10px;margin-bottom:8px;font-size:.8rem}
+.power-bar{height:12px;border-radius:6px;background:var(--border);margin:6px 0;overflow:hidden}
+.power-fill{height:100%;border-radius:6px;transition:width .4s}
+#log{background:#060810;border:1px solid var(--border);border-radius:6px;padding:11px 13px;
+  font-family:monospace;font-size:.73rem;color:#9fb3cc;max-height:160px;overflow-y:auto;white-space:pre-wrap;line-height:1.6}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;
+  border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+#status-bar{background:var(--surface);border-top:1px solid var(--border);padding:6px 18px;
+  font-size:.76rem;color:var(--muted);display:flex;align-items:center;gap:9px;flex-shrink:0}
+#status-dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.section-hd{font-size:.85rem;font-weight:700;margin-bottom:11px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+.hint{font-size:.75rem;color:var(--muted);font-style:italic;margin-top:4px}
+.device-item{background:var(--surface);border:1px solid var(--border);border-radius:6px;
+  padding:9px 11px;cursor:pointer;margin-bottom:5px;transition:border-color .15s}
+.device-item:hover{border-color:var(--accent)}
+.device-item.active{border-color:var(--accent);background:rgba(79,142,247,.06)}
+.device-item .dn{font-size:.82rem;font-weight:600}
+.device-item .dm{font-size:.72rem;color:var(--muted)}
+.svg-wrap{overflow:auto;background:#07090f;border-radius:8px;padding:12px;border:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+<header>
+  <!-- Puromo logo: stylised P + circuit node -->
+  <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
+    <rect width="30" height="30" rx="6" fill="#4f8ef7" opacity=".15"/>
+    <!-- P shape -->
+    <path d="M7 6 L7 24 M7 6 L16 6 Q21 6 21 11 Q21 16 16 16 L7 16" stroke="#4f8ef7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- circuit nodes -->
+    <circle cx="23" cy="20" r="2" fill="#7c5cd8"/>
+    <circle cx="23" cy="25" r="1.4" fill="#22c55e"/>
+    <line x1="23" y1="22" x2="23" y2="23.6" stroke="#7c5cd8" stroke-width="1.2"/>
+  </svg>
+  <div>
+    <h1 style="letter-spacing:.5px">Puromo <span style="font-size:.85rem;color:var(--muted);font-weight:400">プロモ</span></h1>
+  </div>
+  <span class="badge">Waveshare LCD HAT · Custom PCB · Blender STL · Firmware · PDF Report</span>
+</header>
+
+<div class="layout">
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="sidebar">
+
+  <div class="sb-section">
+    <h4>🔍 Device Search</h4>
+    <input id="q-input" type="text" value="1.3inch LCD HAT" placeholder="Model name…"/>
+    <select id="q-vendor" style="margin-top:6px">
+      <option value="waveshare">Waveshare</option>
+      <option value="adafruit">Adafruit</option>
+      <option value="sparkfun">SparkFun</option>
+      <option value="arduino">Arduino</option>
+      <option value="raspberrypi">Raspberry Pi</option>
+    </select>
+    <div class="btn-row"><button class="btn btn-primary" onclick="doCrawl()">Crawl / Lookup</button></div>
+  </div>
+
+  <div class="sb-section">
+    <h4>📦 Known HATs</h4>
+    <div id="known-list"></div>
+  </div>
+
+  <div class="sb-section">
+    <h4>⚙️ Build Options</h4>
+    <label>Model Name</label>
+    <input id="model-name" type="text" value="handheld_v1"/>
+    <label>GPIO Header Variant</label>
+    <select id="header-variant"></select>
+    <div id="header-info" class="hint" style="margin-top:4px"></div>
+    <label><input type="checkbox" id="inc-battery" style="width:auto;margin-right:5px"/>Include Battery Bay</label>
+    <label>Battery W×H×D (mm)</label>
+    <input id="bat-size" type="text" value="50,20,6"/>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="btn-pipeline" onclick="doPipeline()">▶ Run Pipeline</button>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <h4>🔧 Custom PCB Entry</h4>
+    <div id="custom-pcb-toggle" style="font-size:.74rem;color:var(--accent);cursor:pointer;margin-bottom:8px" onclick="toggleCustomPCB()">▶ Enter custom board dimensions</div>
+    <div id="custom-pcb-form" style="display:none">
+      <label>Board Width (mm)</label>
+      <input id="cpb-width" type="number" value="65" step="0.1"/>
+      <label>Board Height (mm)</label>
+      <input id="cpb-height" type="number" value="30" step="0.1"/>
+      <label>Display Diagonal (inch)</label>
+      <input id="cpb-diag" type="number" value="1.3" step="0.1"/>
+      <label>Resolution (W × H)</label>
+      <div style="display:flex;gap:5px">
+        <input id="cpb-resw" type="number" value="240" style="flex:1"/>
+        <input id="cpb-resh" type="number" value="240" style="flex:1"/>
+      </div>
+      <label>Interface</label>
+      <select id="cpb-iface">
+        <option value="SPI">SPI</option>
+        <option value="I2C">I2C</option>
+        <option value="Parallel">Parallel</option>
+        <option value="HDMI">HDMI</option>
+      </select>
+      <label>Controller IC</label>
+      <input id="cpb-ic" type="text" value="ST7789" placeholder="e.g. ST7789, SSD1306"/>
+      <label>Vendor</label>
+      <input id="cpb-vendor" type="text" value="custom" placeholder="e.g. waveshare"/>
+      <div class="btn-row">
+        <button class="btn btn-green" style="width:100%" onclick="applyCustomPCB()">✓ Apply Custom Spec</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb-section">
+    <h4>🎨 Shell Colours</h4>
+    <div id="colour-parts"></div>
+  </div>
+
+  <div class="sb-section">
+    <h4>🧊 3D Controls</h4>
+    <div class="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-secondary" onclick="resetCamera()">↺ Reset View</button>
+      <button class="btn btn-secondary" onclick="toggleExplode()">⬆ Explode</button>
+    </div>
+    <label>Render Mode</label>
+    <select id="render-mode" onchange="setRenderMode(this.value)">
+      <option value="solid">Solid</option>
+      <option value="wireframe">Wireframe</option>
+      <option value="xray">X-Ray</option>
+    </select>
+    <div class="btn-row">
+      <button class="btn btn-purple" onclick="generate3D()">🧊 Export STL (Blender)</button>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<main class="main">
+<div class="tabs">
+  <div class="tab active"   onclick="showTab('t-3d',this)">3D View</div>
+  <div class="tab"          onclick="showTab('t-spec',this)">Device Spec</div>
+  <div class="tab"          onclick="showTab('t-geom',this)">Geometry</div>
+  <div class="tab"          onclick="showTab('t-pinout',this)">Pinout</div>
+  <div class="tab"          onclick="showTab('t-wiring',this)">Wiring</div>
+  <div class="tab"          onclick="showTab('t-asm',this)">Assembly</div>
+  <div class="tab"          onclick="showTab('t-firmware',this)">Firmware</div>
+  <div class="tab"          onclick="showTab('t-report',this)">📄 Report</div>
+  <div class="tab"          onclick="showTab('t-print',this)">🖨 Print</div>
+  <div class="tab"          onclick="showTab('t-files',this)">Files</div>
+</div>
+
+<!-- ── 3D VIEW ── -->
+<div id="t-3d" class="tab-pane" style="display:flex;flex-direction:column;gap:14px;padding:14px">
+  <canvas id="viewport"></canvas>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <div class="card" style="flex:1;min-width:220px">
+      <h3>Shell Dimensions</h3>
+      <div class="kv" id="dim-kv"><div class="kv-k" style="grid-column:1/-1;color:var(--muted)">Run pipeline first.</div></div>
+    </div>
+    <div class="card" style="flex:1;min-width:220px">
+      <h3>Build Summary</h3>
+      <div class="kv" id="build-kv"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── DEVICE SPEC ── -->
+<div id="t-spec" class="tab-pane" style="display:none">
+  <div class="card">
+    <h3>Raw Device Specification JSON</h3>
+    <textarea id="spec-json" rows="22" placeholder="Crawl a device or select a known HAT…"></textarea>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="computeGeometry()">▶ Compute Geometry</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── GEOMETRY ── -->
+<div id="t-geom" class="tab-pane" style="display:none">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="card">
+      <h3>Shell Envelope</h3>
+      <table class="dt" id="geom-table"><tr><td colspan="2" style="color:var(--muted)">Run pipeline first.</td></tr></table>
+    </div>
+    <div class="card">
+      <h3>2D Top-Down Preview</h3>
+      <canvas id="canvas2d" width="250" height="175" style="border:1px solid var(--border);border-radius:6px;background:#070a0f;display:block"></canvas>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h3>Assembly Notes</h3>
+      <div id="asm-notes" style="font-size:.8rem;line-height:1.9;color:var(--muted)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── PINOUT ── -->
+<div id="t-pinout" class="tab-pane" style="display:none">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="card" style="grid-column:1/-1">
+      <h3>GPIO 40-Pin Header Map</h3>
+      <div class="gpio-grid" id="gpio-map-grid"></div>
+    </div>
+    <div class="card" style="grid-column:1/-1" id="pinout-tables-wrap">
+      <h3>Module Pin Assignments</h3>
+      <div id="pinout-tables"></div>
+    </div>
+    <div class="card">
+      <h3>Conflicts</h3>
+      <div id="conflict-list"><span style="color:var(--muted);font-size:.8rem">None detected.</span></div>
+    </div>
+    <div class="card">
+      <h3>Power Budget</h3>
+      <div id="power-budget"></div>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h3>Safety Checklist</h3>
+      <div id="safety-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── WIRING DIAGRAM ── -->
+<div id="t-wiring" class="tab-pane" style="display:none">
+  <div class="card" style="margin-bottom:14px">
+    <h3>Interactive Wiring Diagram</h3>
+    <p class="hint" style="margin-bottom:10px">Each wire connects a module pin to the matching RPi GPIO. Hover a wire to highlight the full net.</p>
+    <div class="svg-wrap"><svg id="wiring-svg" width="900" height="520"></svg></div>
+  </div>
+  <div class="card">
+    <h3>Wire Colour Legend</h3>
+    <div id="wire-legend" style="display:flex;flex-wrap:wrap;gap:10px;font-size:.78rem"></div>
+  </div>
+</div>
+
+<!-- ── ASSEMBLY ── -->
+<div id="t-asm" class="tab-pane" style="display:none">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="card">
+      <h3>Bill of Materials — Hardware</h3>
+      <table class="dt" id="bom-table">
+        <thead><tr><th>Item</th><th>Qty</th><th>Purpose</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Filament Estimate</h3>
+      <table class="dt" id="fil-table"></table>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h3>Assembly Steps</h3>
+      <div id="steps-list"></div>
+    </div>
+    <div class="card">
+      <h3>Print Settings</h3>
+      <div id="print-settings" style="font-size:.78rem;line-height:1.7;color:var(--muted)"></div>
+    </div>
+    <div class="card">
+      <h3>Tolerances</h3>
+      <table class="dt" id="tol-table"></table>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="downloadFile(currentMdFile)">⬇ Markdown Spec</button>
+        <button class="btn btn-secondary" onclick="downloadFile(currentJsonFile)">⬇ JSON Spec</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── REPORT ── -->
+<div id="t-report" class="tab-pane" style="display:none">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Generate Full Design Report (PDF)</h3>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px">
+        Produces a professional multi-section PDF covering: device architecture,
+        shell dimensions, display math, full pinout tables, wiring colour guide,
+        firmware boot sequence, assembly steps, print settings, safety checklist
+        and a sign-off block. Run the pipeline first to populate all data.
+      </p>
+      <label>Device Name (appears on cover page)</label>
+      <input id="report-device-name" type="text" value="My Handheld Device" style="max-width:320px"/>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-report" onclick="generateReport()">📄 Generate PDF Report</button>
+      </div>
+      <div id="report-status" style="font-size:.8rem;color:var(--muted);margin-top:8px"></div>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Report Sections</h3>
+      <table class="dt">
+        <thead><tr><th>§</th><th>Section</th><th>Content</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Computational Architecture</td><td>Board, MCU, interface, GPIO header, voltage</td></tr>
+          <tr><td>2</td><td>Physical Design</td><td>Shell W×H×D, wall/floor/lid thickness, standoffs, ribs</td></tr>
+          <tr><td>3</td><td>Display Mathematics</td><td>PPI, pixel pitch, diagonal, cutout dimensions + formulae</td></tr>
+          <tr><td>4</td><td>Pinout Reference</td><td>Visual 40-pin GPIO map + per-module wiring tables</td></tr>
+          <tr><td>5</td><td>Wiring Diagram</td><td>Wire colour code table + critical wiring rules</td></tr>
+          <tr><td>6</td><td>Firmware Architecture</td><td>11-phase boot sequence, driver order, scheduler, EventBus</td></tr>
+          <tr><td>7</td><td>Assembly Guide</td><td>Hardware BOM, filament estimate, 9-step assembly</td></tr>
+          <tr><td>8</td><td>3D Print Settings</td><td>Per-part material, temp, infill, speed, support</td></tr>
+          <tr><td>9</td><td>Safety Checklist</td><td>GPIO conflicts, power budget, all safety items</td></tr>
+          <tr><td>10</td><td>Sign-Off Block</td><td>Designer, date, revision, approval signature lines</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── PRINT SERVER ── -->
+<div id="t-print" class="tab-pane" style="display:none">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Supported 3D Printers</h3>
+      <div id="printer-catalogue"></div>
+    </div>
+
+    <div class="card">
+      <h3>Connect to Printer</h3>
+      <label>Printer Model</label>
+      <select id="print-printer-key"></select>
+      <label>Printer IP / Hostname</label>
+      <input id="print-host" type="text" placeholder="192.168.1.x or printer.local"/>
+      <label>API Key (if required)</label>
+      <input id="print-apikey" type="text" placeholder="Leave blank for FlashForge LAN"/>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="pingPrinter()">🔌 Test Connection</button>
+        <button class="btn btn-secondary" onclick="discoverPrinters()">🔍 Discover LAN</button>
+      </div>
+      <div id="print-ping-result" style="font-size:.78rem;margin-top:8px;color:var(--muted)"></div>
+    </div>
+
+    <div class="card">
+      <h3>Create Print Package</h3>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:8px">
+        Packages STL files + slicer profile + transfer README into a ZIP for local or remote delivery.
+      </p>
+      <label>Select Printer</label>
+      <select id="pkg-printer-key"></select>
+      <div class="btn-row">
+        <button class="btn btn-purple" onclick="createPrintPackage()">📦 Create Print Package</button>
+      </div>
+      <div id="pkg-status" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Send to Printer</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:180px">
+          <label>File to Upload</label>
+          <select id="print-file-select"></select>
+        </div>
+        <div class="btn-row" style="margin-top:0">
+          <button class="btn btn-green" onclick="uploadAndPrint()">⬆ Upload & Print</button>
+          <button class="btn btn-secondary" onclick="getPrinterStatus()">📊 Status</button>
+        </div>
+      </div>
+      <div id="print-status-box" style="font-family:monospace;font-size:.75rem;color:#9fb3cc;margin-top:10px;white-space:pre-wrap"></div>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Remote Access Guide</h3>
+      <div id="remote-guide" style="font-size:.78rem;color:var(--muted);line-height:1.8"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── FILES ── -->
+<!-- ── FIRMWARE ── -->
+<div id="t-firmware" class="tab-pane" style="display:none">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Generate Firmware</h3>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px">
+        Generates a complete runnable Python firmware tree for your handheld device:
+        boot sequence, driver files, cooperative asyncio scheduler, EventBus, and application FSM.
+      </p>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-fw-gen" onclick="generateFirmware()">⚡ Generate Firmware</button>
+        <button class="btn btn-secondary" onclick="loadFwArchitecture()">📐 View Architecture</button>
+      </div>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Boot Sequence</h3>
+      <div id="fw-boot-phases"></div>
+    </div>
+
+    <div class="card">
+      <h3>Driver Load Order</h3>
+      <div id="fw-load-order" style="font-family:monospace;font-size:.78rem;color:var(--muted);line-height:1.8"></div>
+    </div>
+
+    <div class="card">
+      <h3>Async Task Scheduler</h3>
+      <table class="dt" id="fw-tasks">
+        <thead><tr><th>Task</th><th>Interval</th><th>Priority</th><th>CPU%</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="fw-scheduler-notes" style="font-size:.74rem;color:var(--muted);margin-top:10px;line-height:1.7"></div>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>EventBus Message Types</h3>
+      <table class="dt" id="fw-events">
+        <thead><tr><th>Event</th><th>Fields</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <h3>Generated Files</h3>
+      <div style="display:flex;gap:12px">
+        <div style="width:220px;flex-shrink:0">
+          <div id="fw-file-tree" style="font-family:monospace;font-size:.78rem;line-height:2;color:var(--muted)"></div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:.78rem;color:var(--muted)" id="fw-viewing-label">Select a file →</span>
+            <button class="btn btn-secondary" style="padding:4px 10px;font-size:.74rem" onclick="downloadFwFile()">⬇ Download</button>
+          </div>
+          <pre id="fw-code-view" style="background:#050710;border:1px solid var(--border);border-radius:6px;
+            padding:12px;font-size:.73rem;color:#9fb3cc;overflow:auto;max-height:420px;white-space:pre;
+            font-family:monospace;line-height:1.6"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="grid-column:1/-1">
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="downloadFwReadme()">⬇ README_FIRMWARE.md</button>
+        <button class="btn btn-secondary" onclick="downloadFwZip()">⬇ Download All (zip)</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="t-files" class="tab-pane" style="display:none">
+  <div class="card">
+    <h3>Generated Output Files</h3>
+    <div id="file-list" style="display:flex;flex-direction:column;gap:7px"></div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn btn-secondary" onclick="refreshFiles()">↻ Refresh</button>
+      <button class="btn btn-secondary" onclick="startBlenderLogPoll()">🔄 Watch Blender Log</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Blender Log <span id="blender-log-status" style="font-size:.72rem;color:var(--muted)"></span></h3>
+    <div id="log">—</div>
+  </div>
+  <div class="card">
+    <h3>Saved Builds</h3>
+    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Save up to 3 named device configurations for quick recall.</p>
+    <div id="saved-builds-list" style="display:flex;flex-direction:column;gap:7px"></div>
+    <div class="btn-row" style="margin-top:8px">
+      <input id="save-slot-name" type="text" placeholder="Build name…" style="flex:1;min-width:0"/>
+      <button class="btn btn-green" onclick="saveBuild()">💾 Save Current</button>
+    </div>
+  </div>
+</div>
+
+</main>
+</div>
+<div id="status-bar"><div id="status-dot"></div><span id="status-msg">Ready</span></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════
+const API = '';
+let currentSpec=null, currentGeom=null, currentBuild=null, currentSpecs=null, currentPinout=null;
+let currentMdFile=null, currentJsonFile=null;
+let headerVariants={};
+let exploded=false;
+
+// Shell part colours (defaults)
+const SHELL_PARTS = {
+  bottom: { label:'Bottom Case',   colour:'#1a2a4a' },
+  lid:    { label:'Lid / Top Case', colour:'#1e3a5f' },
+  button: { label:'Button Caps',   colour:'#c0392b' },
+  grip:   { label:'Grip Panels',   colour:'#2d2d2d' },
+  stand:  { label:'Standoffs',     colour:'#b8860b' },
+};
+const PALETTE = [
+  '#1a2a4a','#1e3a5f','#2d4a2d','#4a2d2d','#2d2d4a',
+  '#c0392b','#e67e22','#27ae60','#8e44ad','#2980b9',
+  '#ecf0f1','#2c3e50','#1abc9c','#f39c12','#d35400',
+  '#16a085','#8e44ad','#2ecc71','#e74c3c','#3498db',
+];
+
+// ═══════════════════════════════════════════════════════
+//  Three.js 3D Renderer
+// ═══════════════════════════════════════════════════════
+let scene, camera, renderer, controls, shellObjects={};
+
+function initThree() {
+  const canvas = document.getElementById('viewport');
+  const W = canvas.parentElement.clientWidth - 28;
+  const H = Math.max(360, Math.round(W * 0.45));
+  canvas.width = W; canvas.height = H;
+
+  scene    = new THREE.Scene();
+  scene.background = new THREE.Color(0x070a0f);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+  const dLight = new THREE.DirectionalLight(0xffffff, 0.9);
+  dLight.position.set(100, 180, 120);
+  scene.add(dLight);
+  const dLight2 = new THREE.DirectionalLight(0x8899ff, 0.3);
+  dLight2.position.set(-80, -60, -100);
+  scene.add(dLight2);
+
+  // Grid
+  const grid = new THREE.GridHelper(200, 40, 0x1e2335, 0x1e2335);
+  grid.position.y = -1;
+  scene.add(grid);
+
+  camera = new THREE.PerspectiveCamera(45, W/H, 0.1, 5000);
+  camera.position.set(80, 60, 110);
+
+  renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.setSize(W, H);
+  renderer.shadowMap.enabled = true;
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 20;
+  controls.maxDistance = 800;
+
+  animate();
+  window.addEventListener('resize', onResize);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function onResize() {
+  if (!renderer) return;
+  const canvas = document.getElementById('viewport');
+  const W = canvas.parentElement.clientWidth - 28;
+  const H = Math.max(360, Math.round(W*0.45));
+  camera.aspect = W/H;
+  camera.updateProjectionMatrix();
+  renderer.setSize(W,H);
+}
+
+function resetCamera() {
+  if (!camera) return;
+  camera.position.set(80,60,110);
+  controls.target.set(0,0,0);
+  controls.update();
+}
+
+function setRenderMode(mode) {
+  Object.values(shellObjects).forEach(obj=>{
+    if (!obj) return;
+    obj.traverse(c=>{
+      if (c.isMesh) {
+        if (mode==='wireframe') {
+          c.material.wireframe=true; c.material.opacity=1; c.material.transparent=false;
+        } else if (mode==='xray') {
+          c.material.wireframe=false; c.material.opacity=0.3; c.material.transparent=true;
+        } else {
+          c.material.wireframe=false; c.material.opacity=1; c.material.transparent=false;
+        }
+      }
+    });
+  });
+}
+
+let explodeT=0;
+function toggleExplode() {
+  exploded = !exploded;
+  const target = exploded ? 15 : 0;
+  if (shellObjects.lid) {
+    const startY = shellObjects.lid.position.y;
+    const delta = target - startY;
+    let t=0;
+    const anim = setInterval(()=>{
+      t+=0.05;
+      if(t>=1){clearInterval(anim);t=1;}
+      const ease = t<0.5 ? 2*t*t : -1+(4-2*t)*t;
+      shellObjects.lid.position.y = startY + delta*ease;
+    }, 16);
+  }
+}
+
+// Build the 3D shell from geometry data
+function buildShell3D(geom) {
+  // Clear old shell
+  Object.values(shellObjects).forEach(o=>{ if(o) scene.remove(o); });
+  shellObjects = {};
+
+  if (!geom) return;
+
+  const W  = geom.shell_width_mm  || 70;
+  const H  = geom.shell_height_mm || 35;
+  const D  = geom.shell_depth_mm  || 20;
+  const WT = 2.0; // wall thickness
+  const FT = 2.5; // floor thickness
+  const LT = 1.8; // lid thickness
+
+  // Helper: rounded-box (approximated as BoxGeometry for now)
+  function mat(colHex, opacity=1) {
+    const m = new THREE.MeshPhongMaterial({
+      color: new THREE.Color(colHex),
+      opacity, transparent: opacity<1,
+      shininess: 60,
+    });
+    return m;
+  }
+
+  // ── Bottom case ──
+  const splitZ  = D - LT - 1;  // parting line Z
+  const floorH  = FT;
+  const shellH  = splitZ - floorH;
+
+  const bottomGeo = new THREE.BoxGeometry(W, floorH, H);
+  const bottomObj = new THREE.Mesh(bottomGeo, mat(SHELL_PARTS.bottom.colour));
+  bottomObj.position.set(W/2, floorH/2, H/2);
+  scene.add(bottomObj);
+  shellObjects.bottom = bottomObj;
+
+  // Walls
+  const wallData = [
+    // front  [wx,wy,wz, px,py,pz]
+    [W, shellH, WT,   W/2, floorH+shellH/2, WT/2],
+    // back
+    [W, shellH, WT,   W/2, floorH+shellH/2, H-WT/2],
+    // left
+    [WT, shellH, H-2*WT, WT/2, floorH+shellH/2, H/2],
+    // right
+    [WT, shellH, H-2*WT, W-WT/2, floorH+shellH/2, H/2],
+  ];
+  const wallGroup = new THREE.Group();
+  wallData.forEach(([ww,wh,wd,px,py,pz])=>{
+    const g = new THREE.BoxGeometry(ww,wh,wd);
+    const m = new THREE.Mesh(g, mat(SHELL_PARTS.bottom.colour));
+    m.position.set(px,py,pz);
+    wallGroup.add(m);
+  });
+  scene.add(wallGroup);
+  shellObjects.walls = wallGroup;
+
+  // ── Lid ──
+  const lidGroup = new THREE.Group();
+  const lidBase  = new THREE.Mesh(new THREE.BoxGeometry(W, LT, H), mat(SHELL_PARTS.lid.colour));
+  lidBase.position.set(W/2, splitZ + LT/2, H/2);
+  lidGroup.add(lidBase);
+
+  // Display cutout (recessed window)
+  const dc = geom.display_cutout;
+  if (dc && dc.w > 0) {
+    const winGeo = new THREE.BoxGeometry(dc.w, LT+0.2, dc.h);
+    const winMesh = new THREE.Mesh(winGeo, mat('#0a0c14'));
+    winMesh.position.set(dc.x+dc.w/2, splitZ+LT/2, dc.y+dc.h/2);
+    lidGroup.add(winMesh);
+    // Glass pane
+    const glassGeo = new THREE.BoxGeometry(dc.w-0.4, 0.3, dc.h-0.4);
+    const glassMesh = new THREE.Mesh(glassGeo, mat('#aaddff', 0.35));
+    glassMesh.position.set(dc.x+dc.w/2, splitZ+LT+0.1, dc.y+dc.h/2);
+    lidGroup.add(glassMesh);
+  }
+
+  scene.add(lidGroup);
+  shellObjects.lid = lidGroup;
+
+  // ── PCB (green board) ──
+  const pcbGeo = new THREE.BoxGeometry(
+    geom.board_width_mm||65, 1.6, geom.board_height_mm||30
+  );
+  const pcb = new THREE.Mesh(pcbGeo, mat('#1a4a1a', 0.9));
+  pcb.position.set(
+    (geom.pcb_offset_x||3) + (geom.board_width_mm||65)/2,
+    geom.pcb_z_from_floor||5.5,
+    (geom.pcb_offset_y||3) + (geom.board_height_mm||30)/2
+  );
+  scene.add(pcb);
+  shellObjects.pcb = pcb;
+
+  // ── Mounting bosses ──
+  const bossGroup = new THREE.Group();
+  (geom.mounting_bosses||[]).forEach(b=>{
+    const g = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, b.depth||3, 16);
+    const m = new THREE.Mesh(g, mat(SHELL_PARTS.stand.colour));
+    m.position.set(b.cx, (b.depth||3)/2 + FT, b.cy);
+    bossGroup.add(m);
+  });
+  scene.add(bossGroup);
+  shellObjects.bosses = bossGroup;
+
+  // ── Button caps ──
+  const btnGroup = new THREE.Group();
+  (geom.button_apertures||[]).forEach(b=>{
+    const g = new THREE.CylinderGeometry(b.r-0.1||1.9, b.r-0.1||1.9, 2.5, 12);
+    const m = new THREE.Mesh(g, mat(SHELL_PARTS.button.colour));
+    m.position.set(b.cx, splitZ + LT + 1.3, b.cy);
+    btnGroup.add(m);
+  });
+  scene.add(btnGroup);
+  shellObjects.buttons = btnGroup;
+
+  // ── Joystick ──
+  const joy = geom.joystick_aperture;
+  if (joy && joy.r > 0) {
+    const jg = new THREE.CylinderGeometry(joy.r*0.7||4, joy.r||6, 8, 16);
+    const jm = new THREE.Mesh(jg, mat('#333355'));
+    jm.position.set(joy.cx, splitZ + LT + 4, joy.cy);
+    scene.add(jm);
+    shellObjects.joystick = jm;
+  }
+
+  // Centre camera on shell
+  controls.target.set(W/2, D/3, H/2);
+  camera.position.set(W/2 + W*0.9, D*1.5, H/2 + H*1.4);
+  controls.update();
+
+  // Update 2D preview
+  draw2D(geom);
+
+  // Update dim KV
+  updateDimKV(geom);
+}
+
+function updateDimKV(g) {
+  const data = [
+    ['Shell W',  (g.shell_width_mm||0)+' mm'],
+    ['Shell H',  (g.shell_height_mm||0)+' mm'],
+    ['Shell D',  (g.shell_depth_mm||0)+' mm'],
+    ['PCB',      (g.board_width_mm||'—')+'×'+(g.board_height_mm||'—')+' mm'],
+    ['Display',  g.display_cutout?.w ? g.display_cutout.w+'×'+g.display_cutout.h+' mm' : '—'],
+    ['PPI',      g.ppi||'—'],
+    ['Bosses',   (g.mounting_bosses||[]).length],
+    ['Buttons',  (g.button_apertures||[]).length],
+  ];
+  document.getElementById('dim-kv').innerHTML =
+    data.map(([k,v])=>`<div class="kv-k">${k}</div><div class="kv-v">${v}</div>`).join('');
+}
+
+// Apply colour to shell part
+function applyColour(partKey, hex) {
+  SHELL_PARTS[partKey].colour = hex;
+  const obj = shellObjects[partKey] || shellObjects[partKey==='bottom'?'walls':partKey];
+  const updateMat = o => { if(o) o.traverse(c=>{if(c.isMesh) c.material.color.set(hex);})};
+  if (partKey==='bottom') {
+    updateMat(shellObjects.bottom);
+    updateMat(shellObjects.walls);
+  } else if (partKey==='lid') {
+    if(shellObjects.lid) shellObjects.lid.children[0].material.color.set(hex);
+  } else if (partKey==='button') {
+    updateMat(shellObjects.buttons);
+    if(shellObjects.joystick) shellObjects.joystick.material.color.set(hex);
+  } else if (partKey==='stand') {
+    updateMat(shellObjects.bosses);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  2D Canvas preview
+// ═══════════════════════════════════════════════════════
+function draw2D(g) {
+  const c = document.getElementById('canvas2d');
+  const ctx = c.getContext('2d');
+  const W=c.width, H=c.height;
+  ctx.clearRect(0,0,W,H);
+  const sw=g.shell_width_mm, sh=g.shell_height_mm;
+  const scale=Math.min((W-16)/sw,(H-16)/sh);
+  const ox=(W-sw*scale)/2, oy=(H-sh*scale)/2;
+  const mx=x=>ox+x*scale, my=y=>oy+(sh-y)*scale;
+  const cr=(g.corner_radius||3)*scale;
+
+  ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(mx(g.corner_radius||3),my(0));
+  ctx.lineTo(mx(sw-(g.corner_radius||3)),my(0));
+  ctx.arcTo(mx(sw),my(0),mx(sw),my(g.corner_radius||3),cr);
+  ctx.lineTo(mx(sw),my(sh-(g.corner_radius||3)));
+  ctx.arcTo(mx(sw),my(sh),mx(sw-(g.corner_radius||3)),my(sh),cr);
+  ctx.lineTo(mx(g.corner_radius||3),my(sh));
+  ctx.arcTo(mx(0),my(sh),mx(0),my(sh-(g.corner_radius||3)),cr);
+  ctx.lineTo(mx(0),my(g.corner_radius||3));
+  ctx.arcTo(mx(0),my(0),mx(g.corner_radius||3),my(0),cr);
+  ctx.closePath(); ctx.stroke();
+
+  const dc=g.display_cutout;
+  if(dc&&dc.w){
+    ctx.fillStyle='rgba(79,142,247,.2)';
+    ctx.fillRect(mx(dc.x),my(dc.y+dc.h),dc.w*scale,dc.h*scale);
+    ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=.8;
+    ctx.strokeRect(mx(dc.x),my(dc.y+dc.h),dc.w*scale,dc.h*scale);
+  }
+  ctx.strokeStyle='#7c5cd8';
+  (g.mounting_bosses||[]).forEach(b=>{
+    ctx.beginPath(); ctx.arc(mx(b.cx),my(b.cy),b.r*scale,0,Math.PI*2); ctx.stroke();
+  });
+  ctx.strokeStyle='#22c55e';
+  (g.button_apertures||[]).forEach(b=>{
+    ctx.beginPath(); ctx.arc(mx(b.cx),my(b.cy),b.r*scale,0,Math.PI*2); ctx.stroke();
+  });
+  const joy=g.joystick_aperture;
+  if(joy&&joy.r){
+    ctx.strokeStyle='#f59e0b';
+    ctx.beginPath(); ctx.arc(mx(joy.cx),my(joy.cy),joy.r*scale,0,Math.PI*2); ctx.stroke();
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Colour UI
+// ═══════════════════════════════════════════════════════
+function buildColourUI() {
+  const el = document.getElementById('colour-parts');
+  el.innerHTML = '';
+  Object.entries(SHELL_PARTS).forEach(([key,part])=>{
+    const row = document.createElement('div');
+    row.className = 'part-row';
+    row.innerHTML = `<span class="part-name">${part.label}</span>
+      <div style="display:flex;gap:5px;align-items:center">
+        <div style="width:20px;height:20px;border-radius:4px;background:${part.colour};border:1px solid rgba(255,255,255,.2);cursor:pointer"
+          onclick="openColourPicker('${key}',this)" id="swatch-${key}"></div>
+        <input type="color" value="${part.colour}" style="width:0;height:0;opacity:0;position:absolute"
+          id="cp-${key}" onchange="pickColour('${key}',this.value)"/>
+      </div>`;
+    el.appendChild(row);
+  });
+}
+
+function openColourPicker(key) {
+  document.getElementById('cp-'+key).click();
+}
+
+function pickColour(key, hex) {
+  SHELL_PARTS[key].colour = hex;
+  document.getElementById('swatch-'+key).style.background = hex;
+  applyColour(key, hex);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Wiring SVG diagram
+// ═══════════════════════════════════════════════════════
+function buildWiringDiagram(pinout) {
+  const svg = document.getElementById('wiring-svg');
+  if (!pinout) return;
+
+  const W=900, H=520;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.setAttribute('width',W); svg.setAttribute('height',H);
+
+  const tables = pinout.wiring_tables || {};
+  const moduleKeys = Object.keys(tables);
+  if (!moduleKeys.length) return;
+
+  // Left column: RPi GPIO header (physical pins 1-40)
+  const gpioMap = pinout.gpio_map || [];
+  const rpiX = 60, rpiY = 30, pinH = 11.5, pinW = 130;
+  const moduleStartX = 580;
+
+  let svgContent = `<defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#4f8ef7" opacity=".7"/>
+    </marker>
+  </defs>`;
+
+  // RPi header
+  svgContent += `<text x="${rpiX}" y="20" fill="#8892a4" font-size="10" font-family="monospace">RPi GPIO (Physical)</text>`;
+  gpioMap.slice(0,40).forEach((pin,i)=>{
+    const y = rpiY + i * pinH;
+    const fill = pin.claimed_by ? pin.claimed_by.colour : '#1c2030';
+    const textFill = pin.claimed_by ? '#fff' : '#8892a4';
+    svgContent += `<rect x="${rpiX}" y="${y}" width="${pinW}" height="${pinH-1}" rx="2" fill="${fill}" opacity="${pin.claimed_by?1:0.7}"/>`;
+    svgContent += `<text x="${rpiX+4}" y="${y+8}" fill="${textFill}" font-size="7.5" font-family="monospace">P${String(pin.phys).padStart(2,'0')} ${pin.name}</text>`;
+  });
+
+  // Modules (right side)
+  let modY = rpiY;
+  const wirePaths = [];
+  moduleKeys.forEach((modKey, mi)=>{
+    const tbl = tables[modKey];
+    if (!tbl) return;
+    const rows = tbl.rows || [];
+    const modH = rows.length * pinH + 20;
+    const modX = moduleStartX;
+
+    svgContent += `<text x="${modX}" y="${modY-4}" fill="#8892a4" font-size="9" font-family="sans-serif">${tbl.label}</text>`;
+    rows.forEach((row,ri)=>{
+      const ry = modY + ri*pinH;
+      const colFill = row.wire_colour || '#333';
+      svgContent += `<rect x="${modX}" y="${ry}" width="240" height="${pinH-1}" rx="2" fill="#1c2030" stroke="${colFill}" stroke-width=".8"/>`;
+      svgContent += `<text x="${modX+5}" y="${ry+8}" fill="#e2e8f0" font-size="7.5" font-family="monospace">${row.module_pin} → GPIO${row.bcm||'—'} P${row.phys_pin||'—'}</text>`;
+      // Wire
+      if (row.phys_pin && row.phys_pin !== '—') {
+        const srcPinIdx = gpioMap.findIndex(p=>p.phys===row.phys_pin);
+        if (srcPinIdx>=0) {
+          const x1 = rpiX + pinW;
+          const y1 = rpiY + srcPinIdx*pinH + pinH/2;
+          const x2 = modX;
+          const y2 = ry + (pinH-1)/2;
+          const cx = (x1+x2)/2;
+          wirePaths.push(`<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}"
+            fill="none" stroke="${colFill}" stroke-width="1.4" opacity=".75"
+            marker-end="url(#arrowhead)"/>
+            <circle cx="${x1}" cy="${y1}" r="2.5" fill="${colFill}"/>
+            <circle cx="${x2}" cy="${y2}" r="2.5" fill="${colFill}"/>`);
+        }
+      }
+    });
+    modY += modH + 10;
+  });
+
+  svgContent += wirePaths.join('');
+  svg.innerHTML = svgContent;
+
+  // Legend
+  const legendEl = document.getElementById('wire-legend');
+  legendEl.innerHTML = '';
+  const wc = pinout.wire_colours || {};
+  Object.entries(wc).forEach(([role,data])=>{
+    const item = document.createElement('div');
+    item.style.cssText='display:flex;align-items:center;gap:5px';
+    item.innerHTML=`<span class="wire-dot" style="background:#${data.hex}"></span><span>${role} — ${data.name}</span>`;
+    legendEl.appendChild(item);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  GPIO map grid
+// ═══════════════════════════════════════════════════════
+function renderGPIOMap(gpioMap) {
+  const el = document.getElementById('gpio-map-grid');
+  el.innerHTML = gpioMap.map(p=>{
+    const col = p.claimed_by ? p.claimed_by.colour : '#1c2030';
+    const bc  = p.claimed_by ? p.claimed_by.colour : 'var(--border)';
+    const lbl = p.claimed_by ? `${p.claimed_by.module} [${p.claimed_by.role}]` : p.name;
+    return `<div class="gpio-pin ${p.claimed_by?'claimed':''}" style="background:${col};border-color:${bc}" title="${lbl}">
+      <span class="gpio-num">P${String(p.phys).padStart(2,'0')}</span>
+      <span class="gpio-name" style="color:${p.claimed_by?'#fff':'var(--muted)'}">${p.name}</span>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Pinout tables
+// ═══════════════════════════════════════════════════════
+function renderPinoutTables(pinout) {
+  const el = document.getElementById('pinout-tables');
+  const tables = pinout.wiring_tables || {};
+  el.innerHTML = '';
+
+  Object.entries(tables).forEach(([key, tbl])=>{
+    const div = document.createElement('div');
+    div.style.marginBottom='16px';
+    const rows = tbl.rows.map(r=>`
+      <tr>
+        <td><span class="wire-dot" style="background:${r.wire_colour}"></span>${r.module_pin}</td>
+        <td>${r.gpio_name}</td>
+        <td style="font-family:monospace">${r.bcm!=='—'?'BCM '+r.bcm:r.phys_pin!=='—'?'P'+r.phys_pin:'—'}</td>
+        <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${r.wire_colour};vertical-align:middle;margin-right:4px"></span>${r.wire_name}</td>
+        <td>${r.required?'<span class="tag tag-red">REQ</span>':'<span class="tag">OPT</span>'}</td>
+        <td style="color:var(--muted);max-width:260px;font-size:.72rem">${r.note}</td>
+      </tr>`).join('');
+    const extraRows = Object.entries(tbl.extra_signals||{}).map(([sig,info])=>`
+      <tr style="opacity:.8">
+        <td>${sig}</td>
+        <td>${RPI_GPIO_JS[info.gpio_key]?.name||info.gpio_key||'—'}</td>
+        <td style="font-family:monospace">${RPI_GPIO_JS[info.gpio_key]?.bcm?'BCM '+RPI_GPIO_JS[info.gpio_key].bcm:'—'}</td>
+        <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${WIRE_COLOURS_JS[info.role]?.colour||'#555'};vertical-align:middle;margin-right:4px"></span>${WIRE_COLOURS_JS[info.role]?.name||info.role}</td>
+        <td><span class="tag">OPT</span></td>
+        <td style="color:var(--muted);font-size:.72rem">${info.note}</td>
+      </tr>`).join('');
+
+    div.innerHTML=`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <b style="font-size:.85rem">${tbl.label}</b>
+        <span class="tag tag-blue">${tbl.interface}</span>
+        <span class="tag tag-yellow">${tbl.voltage}V</span>
+      </div>
+      <table class="dt" style="margin-bottom:6px">
+        <thead><tr><th>Module Pin</th><th>GPIO Name</th><th>BCM/Phys</th><th>Wire</th><th></th><th>Note</th></tr></thead>
+        <tbody>${rows}${extraRows}</tbody>
+      </table>
+      ${tbl.software?.init_cmd?`<div style="font-size:.74rem;color:var(--muted);margin-bottom:4px">Init: <code style="background:#0a0c12;padding:2px 6px;border-radius:3px">${tbl.software.init_cmd}</code></div>`:''}
+    `;
+    el.appendChild(div);
+  });
+}
+
+// Cache for client-side GPIO lookup in extra_signals rendering
+let RPI_GPIO_JS = {};
+let WIRE_COLOURS_JS = {};
+
+// ═══════════════════════════════════════════════════════
+//  Power budget
+// ═══════════════════════════════════════════════════════
+function renderPowerBudget(pb) {
+  const pct = Math.min(100, Math.round(pb.grand_total_ma / 4500 * 100));
+  const colour = pct > 80 ? '#ef4444' : pct > 60 ? '#f59e0b' : '#22c55e';
+  document.getElementById('power-budget').innerHTML = `
+    <div class="kv" style="margin-bottom:8px">
+      <div class="kv-k">Host board</div><div class="kv-v">${pb.host_board}</div>
+      <div class="kv-k">Host TDP</div><div class="kv-v">${pb.host_tdp_ma} mA</div>
+      <div class="kv-k">Modules total</div><div class="kv-v">${pb.modules_total_ma} mA</div>
+      <div class="kv-k">Grand total</div><div class="kv-v">${pb.grand_total_ma} mA (${pb.grand_total_w}W)</div>
+      <div class="kv-k">Recommended PSU</div><div class="kv-v">${pb.recommended_psu_a}A @ 5V</div>
+    </div>
+    <div class="power-bar"><div class="power-fill" style="width:${pct}%;background:${colour}"></div></div>
+    <div style="font-size:.74rem;color:${colour}">${pct}% of 4.5A budget</div>
+    <div style="margin-top:8px;font-size:.75rem;color:var(--muted)">
+      ${Object.entries(pb.per_module).map(([k,v])=>`${k.replace(/_/g,' ')}: ${v}mA`).join(' · ')}
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  Safety checklist
+// ═══════════════════════════════════════════════════════
+function renderSafety(checks) {
+  document.getElementById('safety-list').innerHTML = checks.map(c=>`
+    <div class="safety-item">
+      <div class="safety-icon ${c.status==='critical'?'safety-critical':'safety-verify'}">
+        ${c.status==='critical'?'!':'✓'}
+      </div>
+      <div>${c.check}</div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Status / nav helpers
+// ═══════════════════════════════════════════════════════
+function status(msg,col='var(--muted)'){document.getElementById('status-msg').textContent=msg;document.getElementById('status-dot').style.background=col;}
+function statusOk(m){status(m,'var(--green)');}
+function statusErr(m){status(m,'var(--red)');}
+function statusBusy(m){status(m,'var(--yellow)');}
+
+function showTab(id,el) {
+  document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(id).style.display='';
+  if(el) el.classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', async ()=>{
+  initThree();
+  buildColourUI();
+  await Promise.all([loadKnownDevices(), loadHeaderVariants()]);
+  refreshFiles();
+  // Pre-load GPIO reference for client-side lookup
+  fetch(API+'/api/gpio-map').then(r=>r.json()).then(d=>{
+    d.gpio.forEach(p=>{ RPI_GPIO_JS[Object.keys(RPI_GPIO_JS).length]=p; });
+    // Also key by name
+    d.gpio.forEach(p=>{ if(p.gpio_key) RPI_GPIO_JS[p.gpio_key]=p; });
+  }).catch(()=>{});
+});
+
+// ═══════════════════════════════════════════════════════
+//  Known devices
+// ═══════════════════════════════════════════════════════
+async function loadKnownDevices() {
+  const r = await fetch(API+'/api/known-devices');
+  const d = await r.json();
+  const el = document.getElementById('known-list');
+  el.innerHTML='';
+  Object.entries(d.devices).forEach(([key,dev])=>{
+    const item=document.createElement('div');
+    item.className='device-item';
+    item.innerHTML=`<div class="dn">${dev.model}</div>
+      <div class="dm">${dev.board_mm} mm · ${dev.display}</div>
+      <div style="margin-top:3px"><span class="tag tag-blue">${dev.interface}</span></div>`;
+    item.onclick=()=>{ document.querySelectorAll('.device-item').forEach(i=>i.classList.remove('active')); item.classList.add('active'); doCrawl(key); };
+    el.appendChild(item);
+  });
+}
+
+async function loadHeaderVariants() {
+  const r = await fetch(API+'/api/header-variants');
+  const d = await r.json();
+  headerVariants = d.variants;
+  const sel = document.getElementById('header-variant');
+  sel.innerHTML='';
+  Object.entries(d.variants).forEach(([k,v])=>{
+    const o=document.createElement('option');
+    o.value=k; o.textContent=`${v.label}  (gap ${v.mated_gap_mm}mm)`;
+    if(k==='standard_11mm') o.selected=true;
+    sel.appendChild(o);
+  });
+  sel.onchange=()=>{
+    const v=headerVariants[sel.value];
+    if(!v) return;
+    document.getElementById('header-info').textContent=`↕ ${v.above_mm}mm above · ${v.below_mm}mm below PCB`;
+    if(currentSpec){
+      currentSpec.gpio_header_variant=sel.value;
+      currentSpec.gpio_header_above_mm=v.above_mm;
+      currentSpec.gpio_header_below_mm=v.below_mm;
+      currentSpec.gpio_header_mated_gap_mm=v.mated_gap_mm;
+      document.getElementById('spec-json').value=JSON.stringify(currentSpec,null,2);
+    }
+  };
+  sel.onchange();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Crawl
+// ═══════════════════════════════════════════════════════
+async function doCrawl(key) {
+  const q=key||document.getElementById('q-input').value;
+  const vendor=document.getElementById('q-vendor').value;
+  statusBusy('Looking up '+q+'…');
+  try {
+    const r=await fetch(API+'/api/crawl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,vendor})});
+    const d=await r.json();
+    if(d.status!=='ok') throw new Error(d.detail||'Error');
+    currentSpec=d.spec;
+    document.getElementById('spec-json').value=JSON.stringify(currentSpec,null,2);
+    statusOk('Spec loaded: '+currentSpec.model);
+  } catch(e){ statusErr('Crawl failed: '+e.message); }
+}
+
+async function computeGeometry() {
+  try { currentSpec=JSON.parse(document.getElementById('spec-json').value); } catch(e){ statusErr('Bad JSON'); return; }
+  statusBusy('Computing geometry…');
+  try {
+    const r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
+    const d=await r.json();
+    if(d.status!=='ok') throw new Error(d.detail||'');
+    currentGeom=d.geometry;
+    buildShell3D(currentGeom);
+    renderGeomTable(currentGeom);
+    statusOk('Geometry computed');
+  } catch(e){ statusErr('Geometry error: '+e.message); }
+}
+
+function renderGeomTable(g) {
+  const rows=[
+    ['Shell W×H×D',`${g.shell_width_mm}×${g.shell_height_mm}×${g.shell_depth_mm} mm`],
+    ['PCB offset','('+g.pcb_offset_x+', '+g.pcb_offset_y+') mm'],
+    ['PCB Z',''+g.pcb_z_from_floor+' mm'],
+    ['Corner R',''+g.corner_radius+' mm'],
+    ['Bosses',''+( g.mounting_bosses||[]).length],
+    ['Ribs',''+(g.ribs||[]).length],
+    ['Snap-fits',''+(g.snap_fit_positions||[]).length],
+    ['PPI',''+(g.ppi||'—')],
+    ['Pixel pitch',g.pixel_pitch_mm?(g.pixel_pitch_mm+' mm'):'—'],
+  ];
+  document.getElementById('geom-table').innerHTML=`<thead><tr><th>Param</th><th>Value</th></tr></thead><tbody>`+
+    rows.map(r=>`<tr><td>${r[0]}</td><td style="font-family:monospace">${r[1]}</td></tr>`).join('')+'</tbody>';
+  document.getElementById('asm-notes').innerHTML=
+    (g.assembly_notes||[]).map(n=>`<div>• ${n}</div>`).join('') || '—';
+}
+
+// ═══════════════════════════════════════════════════════
+//  Full pipeline
+// ═══════════════════════════════════════════════════════
+async function doPipeline() {
+  const btn=document.getElementById('btn-pipeline');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
+  if(!document.getElementById('spec-json').value.trim()) await doCrawl();
+  try {
+    currentSpec=JSON.parse(document.getElementById('spec-json').value);
+    // Inject header
+    const hSel=document.getElementById('header-variant');
+    if(hSel.value&&headerVariants[hSel.value]){
+      const hv=headerVariants[hSel.value];
+      currentSpec.gpio_header_variant=hSel.value;
+      currentSpec.gpio_header_above_mm=hv.above_mm;
+      currentSpec.gpio_header_below_mm=hv.below_mm;
+      currentSpec.gpio_header_mated_gap_mm=hv.mated_gap_mm;
+    }
+
+    // 1. Geometry
+    statusBusy('Geometry…');
+    let r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
+    let d=await r.json(); if(d.status!=='ok') throw new Error('Geom: '+d.detail);
+    currentGeom=d.geometry;
+    buildShell3D(currentGeom);
+    renderGeomTable(currentGeom);
+
+    // 2. Build manifest
+    statusBusy('Build manifest…');
+    const batRaw=document.getElementById('bat-size').value.split(',').map(Number);
+    r=await fetch(API+'/api/generate-build',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({spec:currentSpec,geom:currentGeom,
+        model_name:document.getElementById('model-name').value,
+        include_battery:document.getElementById('inc-battery').checked,
+        battery_size_mm:batRaw})});
+    d=await r.json(); if(d.status!=='ok') throw new Error('Build: '+d.detail);
+    currentBuild=d.build;
+
+    document.getElementById('build-kv').innerHTML=
+      `<div class="kv-k">Model</div><div class="kv-v">${currentBuild.model_name}</div>`+
+      `<div class="kv-k">Entities</div><div class="kv-v">${currentBuild.entity_count}</div>`;
+
+    // 3. Specs
+    statusBusy('Assembly specs…');
+    r=await fetch(API+'/api/assemble-specs',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({spec:currentSpec,geom:currentGeom,build:currentBuild})});
+    d=await r.json(); if(d.status!=='ok') throw new Error('Specs: '+d.detail);
+    currentSpecs=d.specs; currentMdFile=d.files.markdown; currentJsonFile=d.files.json;
+    renderSpecs(currentSpecs);
+
+    // 4. Pinout
+    statusBusy('Pinout & wiring…');
+    r=await fetch(API+'/api/pinout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
+    d=await r.json(); if(d.status!=='ok') throw new Error('Pinout: '+d.detail);
+    currentPinout=d.pinout;
+    WIRE_COLOURS_JS=currentPinout.wire_colours||{};
+    renderGPIOMap(currentPinout.gpio_map||[]);
+    renderPinoutTables(currentPinout);
+    renderPowerBudget(currentPinout.power_budget);
+    renderSafety(currentPinout.safety_checklist||[]);
+    buildWiringDiagram(currentPinout);
+    renderConflicts(currentPinout.conflicts||[]);
+
+    statusOk('Pipeline complete ✓');
+    // Switch to 3D tab
+    showTab('t-3d', document.querySelectorAll('.tab')[0]);
+    document.querySelectorAll('.tab')[0].classList.add('active');
+
+    await refreshFiles();
+  } catch(e){ statusErr('Pipeline error: '+e.message); console.error(e); }
+  finally { btn.disabled=false; btn.innerHTML='▶ Run Pipeline'; }
+}
+
+function renderConflicts(conflicts) {
+  const el=document.getElementById('conflict-list');
+  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>';return;}
+  el.innerHTML=conflicts.map(c=>`
+    <div class="conflict-item">
+      <b style="color:var(--red)">⚠ GPIO ${c.gpio_key} (BCM ${c.bcm}, Phys ${c.phys_pin})</b><br>
+      <span>${c.conflict_between.join(' + ')}</span><br>
+      <span style="color:var(--muted);font-size:.74rem">${c.note}</span>
+    </div>`).join('');
+}
+
+function renderSpecs(specs) {
+  const fas=specs.bom_hardware?.fasteners||{};
+  const wsHat=specs.bom_hardware?.waveshare_hat||{};
+  document.querySelector('#bom-table tbody').innerHTML=
+    [...Object.values(fas),...Object.values(wsHat)].map(f=>`<tr><td>${f.description||''}</td><td>${f.qty||'—'}</td><td>${f.purpose||''}</td></tr>`).join('');
+  const fil=specs.bom_filament||{};
+  document.getElementById('fil-table').innerHTML=
+    `<thead><tr><th>Item</th><th>Value</th></tr></thead><tbody>`+
+    [['Volume',fil.estimated_volume_cm3+' cm³'],['Mass',fil.estimated_mass_g+' g'],
+     ['Cost','$'+fil.estimated_cost_usd+' USD'],['Print time',fil.estimated_print_hours+' hr'],
+     ['Material',fil.recommended_material]].map(r=>`<tr><td>${r[0]}</td><td style="font-family:monospace">${r[1]}</td></tr>`).join('')+'</tbody>';
+  document.getElementById('steps-list').innerHTML=
+    (specs.assembly_steps||[]).map(s=>`<div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0">${s.step}</div>
+      <div><b style="font-size:.82rem">${s.title}</b><br><span style="font-size:.76rem;color:var(--muted)">${s.detail}</span></div>
+    </div>`).join('');
+  const ps=specs.print_settings||{};
+  document.getElementById('print-settings').innerHTML=Object.entries(ps).map(([k,v])=>
+    `<b style="color:var(--text)">${k.replace(/_/g,' ')}</b>: `+
+    Object.entries(v).map(([kk,vv])=>`${kk}: ${vv}`).join(' · ')+'<br/>').join('');
+  const tol=specs.tolerances||{};
+  document.getElementById('tol-table').innerHTML=`<thead><tr><th>Param</th><th>Value</th></tr></thead><tbody>`+
+    Object.entries(tol).filter(([k])=>k!=='notes').map(([k,v])=>`<tr><td>${k.replace(/_/g,' ')}</td><td style="font-family:monospace">${v}</td></tr>`).join('')+'</tbody>';
+}
+
+// ═══════════════════════════════════════════════════════
+//  3D → Blender export
+// ═══════════════════════════════════════════════════════
+async function generate3D() {
+  if(!currentSpec){statusErr('Load a spec first.');return;}
+  statusBusy('Sending to Blender…');
+  try {
+    const r=await fetch(API+'/api/generate-3d',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({spec:currentSpec,model_name:document.getElementById('model-name').value})});
+    const d=await r.json();
+    document.getElementById('log').textContent=JSON.stringify(d,null,2);
+    statusOk('Blender job queued');
+    setTimeout(refreshFiles,5000);
+  } catch(e){ statusErr('3D gen error: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Files
+// ═══════════════════════════════════════════════════════
+async function refreshFiles() {
+  const r=await fetch(API+'/api/outputs');
+  const d=await r.json();
+  const el=document.getElementById('file-list');
+  if(!d.files.length){el.innerHTML='<span style="color:var(--muted);font-size:.8rem">No files yet.</span>';return;}
+  el.innerHTML=d.files.map(f=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:8px 12px">
+      <span><span style="font-family:monospace;font-size:.8rem">${f.name}</span> <span style="color:var(--muted);font-size:.72rem">${f.size_kb}KB</span></span>
+      <button class="btn btn-secondary" style="padding:4px 10px;font-size:.74rem" onclick="downloadFile('${f.name}')">⬇</button>
+    </div>`).join('');
+}
+
+function downloadFile(name){if(name) window.open(API+'/api/download/'+name,'_blank');}
+
+// ═══════════════════════════════════════════════════════
+//  Firmware tab
+// ═══════════════════════════════════════════════════════
+let fwManifest = null;
+let fwViewingPath = null;
+
+async function loadFwArchitecture() {
+  statusBusy('Loading firmware architecture…');
+  const r = await fetch(API+'/api/firmware/architecture');
+  const d = await r.json();
+  renderBootPhases(d.boot_phases);
+  renderLoadOrder(d.driver_load_order);
+  renderScheduler(d.scheduler);
+  renderEventTypes(d.event_types);
+  statusOk('Architecture loaded');
+}
+
+function renderBootPhases(phases) {
+  const el = document.getElementById('fw-boot-phases');
+  el.innerHTML = `<table class="dt"><thead>
+    <tr><th>#</th><th>Phase</th><th>Delay</th><th>Gate</th><th>Description</th></tr>
+  </thead><tbody>`+
+  phases.map(p=>`<tr>
+    <td style="font-family:monospace;color:var(--accent)">${p.phase}</td>
+    <td><b>${p.name}</b></td>
+    <td style="font-family:monospace">${p.delay_ms}ms</td>
+    <td style="font-size:.72rem;color:var(--yellow)">${p.gate}</td>
+    <td style="font-size:.74rem;color:var(--muted)">${p.description}</td>
+  </tr>`).join('')+'</tbody></table>';
+}
+
+function renderLoadOrder(order) {
+  const el = document.getElementById('fw-load-order');
+  el.innerHTML = order.map((d,i)=>
+    `<div style="display:flex;align-items:center;gap:8px">
+      <span style="color:var(--accent);min-width:20px">${String(i+1).padStart(2,'0')}</span>
+      <span style="color:var(--muted)">→</span>
+      <span style="color:var(--text)">${d}</span>
+    </div>`
+  ).join('');
+}
+
+function renderScheduler(sched) {
+  document.querySelector('#fw-tasks tbody').innerHTML =
+    sched.tasks.map(t=>`<tr>
+      <td style="font-family:monospace">${t.name}</td>
+      <td>${t.interval_ms}ms</td>
+      <td><span class="tag ${t.priority==='HIGH'?'tag-red':t.priority==='SYSTEM'?'tag-purple':'tag-blue'}">${t.priority}</span></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="width:60px;height:6px;border-radius:3px;background:var(--border);overflow:hidden">
+            <div style="width:${t.cpu_budget_pct}%;height:100%;background:var(--accent);border-radius:3px"></div>
+          </div>
+          <span style="font-family:monospace;font-size:.74rem">${t.cpu_budget_pct}%</span>
+        </div>
+      </td>
+    </tr>`).join('');
+  document.getElementById('fw-scheduler-notes').innerHTML =
+    `<b style="color:var(--text)">Model:</b> ${sched.model}<br>`+
+    sched.notes.map(n=>`<div>• ${n}</div>`).join('');
+}
+
+function renderEventTypes(events) {
+  document.querySelector('#fw-events tbody').innerHTML =
+    Object.entries(events).map(([name, data])=>`<tr>
+      <td style="font-family:monospace;color:var(--green)">${name}</td>
+      <td style="font-family:monospace;font-size:.74rem;color:var(--muted)">
+        ${data.fields.length ? data.fields.join(', ') : '<i>no fields</i>'}
+      </td>
+    </tr>`).join('');
+}
+
+async function generateFirmware() {
+  if (!currentSpec) { statusErr('Load a device spec first.'); return; }
+  const btn = document.getElementById('btn-fw-gen');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating…';
+  statusBusy('Generating firmware files…');
+  try {
+    const r = await fetch(API+'/api/firmware/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        spec: currentSpec,
+        model_name: document.getElementById('model-name').value
+      })
+    });
+    const d = await r.json();
+    if (d.status !== 'ok') throw new Error(d.detail||'Error');
+    fwManifest = d.manifest;
+    renderBootPhases(fwManifest.boot_phases);
+    renderLoadOrder(fwManifest.driver_load_order);
+    renderScheduler(fwManifest.scheduler);
+    renderEventTypes(fwManifest.event_types);
+    renderFwFileTree(fwManifest.files_list);
+    await refreshFiles();
+    statusOk(`Firmware generated — ${fwManifest.files_list.length} files`);
+  } catch(e) {
+    statusErr('Firmware error: '+e.message);
+  } finally {
+    btn.disabled=false; btn.innerHTML='⚡ Generate Firmware';
+  }
+}
+
+function renderFwFileTree(filesList) {
+  const el = document.getElementById('fw-file-tree');
+  // Group by directory
+  const dirs = {};
+  filesList.forEach(f=>{
+    const parts = f.name.split('/');
+    const dir = parts.length > 1 ? parts.slice(0,-1).join('/') : '.';
+    if (!dirs[dir]) dirs[dir] = [];
+    dirs[dir].push(f);
+  });
+  let html = '';
+  Object.entries(dirs).forEach(([dir, files])=>{
+    if (dir !== '.') html += `<div style="color:var(--accent);margin-top:6px">📁 ${dir}/</div>`;
+    files.forEach(f=>{
+      const short = f.name.split('/').pop();
+      html += `<div style="padding-left:${dir!=='.'?12:0}px;cursor:pointer;padding:3px 3px 3px ${dir!=='.'?14:3}px;border-radius:4px"
+        onmouseover="this.style.background='rgba(79,142,247,.1)'"
+        onmouseout="this.style.background=''"
+        onclick="viewFwFile('${f.path}','${f.name}')">📄 ${short}</div>`;
+    });
+  });
+  el.innerHTML = html;
+}
+
+async function viewFwFile(path, name) {
+  fwViewingPath = path;
+  document.getElementById('fw-viewing-label').textContent = name;
+  statusBusy('Loading '+name+'…');
+  try {
+    const r = await fetch(API+'/api/firmware/file?path='+encodeURIComponent(path));
+    const d = await r.json();
+    // Simple syntax highlight (keywords)
+    let code = d.content
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Highlight Python keywords
+    const kws = ['import','from','def','class','async','await','return','if','else','elif',
+      'for','while','try','except','finally','with','as','True','False','None','self',
+      'raise','pass','break','continue','yield','lambda','not','and','or','in'];
+    kws.forEach(kw=>{
+      code = code.replace(new RegExp(`\\b(${kw})\\b`,'g'),`<span style="color:#c678dd">$1</span>`);
+    });
+    // Strings
+    code = code.replace(/(&#39;.*?&#39;|&quot;.*?&quot;|&#39;&#39;&#39;[\s\S]*?&#39;&#39;&#39;)/g,
+      '<span style="color:#98c379">$1</span>');
+    // Comments
+    code = code.replace(/(#[^\n]*)/g,'<span style="color:#5c6370;font-style:italic">$1</span>');
+    // Numbers
+    code = code.replace(/\b(\d+)\b/g,'<span style="color:#d19a66">$1</span>');
+    document.getElementById('fw-code-view').innerHTML = code;
+    statusOk('Viewing: '+name);
+  } catch(e) { statusErr('File load error: '+e.message); }
+}
+
+function downloadFwFile() {
+  if (fwViewingPath) window.open(API+'/api/firmware/file?path='+encodeURIComponent(fwViewingPath),'_blank');
+}
+
+function downloadFwReadme() {
+  if (!fwManifest) { statusErr('Generate firmware first.'); return; }
+  const model = document.getElementById('model-name').value.replace(/ /g,'_').toLowerCase();
+  window.open(API+'/api/download/'+encodeURIComponent(model)+'/README_FIRMWARE.md','_blank');
+}
+
+function downloadFwZip() {
+  if (!fwManifest) { statusErr('Generate firmware first.'); return; }
+  const model = document.getElementById('model-name').value;
+  statusBusy('Bundling firmware ZIP…');
+  window.open(API+'/api/firmware/zip?model_name='+encodeURIComponent(model),'_blank');
+  setTimeout(()=>{statusOk('Firmware ZIP download started.');refreshFiles();}, 1200);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Report Tab
+// ═══════════════════════════════════════════════════════
+async function generateReport() {
+  if (!currentSpec||!currentGeom||!currentPinout||!currentSpecs) {
+    statusErr('Run the full pipeline first (all data needed for report).');
+    return;
+  }
+  const btn = document.getElementById('btn-report');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating PDF…';
+  const deviceName = document.getElementById('report-device-name').value||'My Handheld Device';
+  statusBusy('Generating PDF report…');
+  try {
+    // Get firmware architecture data
+    let fwArch = {};
+    try {
+      const fr = await fetch(API+'/api/firmware/architecture');
+      fwArch = await fr.json();
+    } catch(e) {}
+
+    const r = await fetch(API+'/api/report/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        device_name:    deviceName,
+        spec:           currentSpec,
+        geom:           currentGeom,
+        pinout:         currentPinout,
+        firmware_arch:  fwArch,
+        assembly_specs: currentSpecs,
+      })
+    });
+    const d = await r.json();
+    if (d.status !== 'ok') throw new Error(d.detail||'Error');
+    document.getElementById('report-status').innerHTML =
+      `✓ PDF generated: <b>${d.pdf_file}</b> — `+
+      `<a href="${API}/api/download/${d.pdf_file}" target="_blank" `+
+      `style="color:var(--accent)">Download PDF</a>`;
+    await refreshFiles();
+    statusOk(`PDF report ready: ${d.pdf_file}`);
+  } catch(e) {
+    statusErr('PDF error: '+e.message);
+    document.getElementById('report-status').textContent = 'Error: '+e.message;
+  } finally {
+    btn.disabled=false; btn.innerHTML='📄 Generate PDF Report';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Print Server Tab
+// ═══════════════════════════════════════════════════════
+let printerCatalogue = {};
+
+document.addEventListener('DOMContentLoaded', async ()=>{
+  // Load printers after a short delay (don't block initial load)
+  setTimeout(loadPrinterCatalogue, 1000);
+});
+
+async function loadPrinterCatalogue() {
+  try {
+    const r = await fetch(API+'/api/print/printers');
+    const d = await r.json();
+    printerCatalogue = d.printers;
+    renderPrinterCatalogue(d.printers);
+    // Populate selects
+    ['print-printer-key','pkg-printer-key'].forEach(id=>{
+      const sel = document.getElementById(id);
+      sel.innerHTML = '';
+      Object.entries(d.printers).forEach(([k,p])=>{
+        const o = document.createElement('option');
+        o.value=k; o.textContent=`${p.brand} ${p.model}`;
+        if(k==='flashforge_adventurer_5m') o.selected=true;
+        sel.appendChild(o);
+      });
+    });
+    // Show remote guide for FlashForge
+    renderRemoteGuide('flashforge_adventurer_5m');
+    // Populate file list
+    await refreshPrintFileList();
+  } catch(e) { console.warn('Printer catalogue load failed:', e); }
+}
+
+function renderPrinterCatalogue(printers) {
+  const el = document.getElementById('printer-catalogue');
+  const rows = [['Brand','Model','Protocol','Formats','Auth','Transfer']];
+  Object.entries(printers).forEach(([k,p])=>{
+    rows.push([
+      p.brand, p.model, p.protocol,
+      p.formats.join(', '),
+      p.auth||'None',
+      p.transfer.join(', '),
+    ]);
+  });
+  const tbl = document.createElement('table');
+  tbl.className='dt'; tbl.style.width='100%';
+  tbl.innerHTML = `<thead><tr>${rows[0].map(h=>`<th>${h}</th>`).join('')}</tr></thead>`+
+    `<tbody>${rows.slice(1).map(r=>`<tr>${r.map(c=>`<td style="font-size:.74rem">${c}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  el.innerHTML=''; el.appendChild(tbl);
+}
+
+function renderRemoteGuide(printerKey) {
+  const p = printerCatalogue[printerKey];
+  if (!p) return;
+  const el = document.getElementById('remote-guide');
+  const endpoints = Object.entries(p.api_endpoints||{}).map(([k,v])=>
+    `<div><b style="color:var(--accent)">${k}:</b> <code style="font-size:.72rem;background:#0a0c12;padding:1px 5px;border-radius:3px">${v}</code></div>`
+  ).join('');
+  el.innerHTML = `
+    <div style="margin-bottom:8px">
+      <b style="color:var(--text)">${p.brand} ${p.model}</b>
+      <span class="tag tag-blue" style="margin-left:6px">${p.protocol}</span>
+    </div>
+    <div style="margin-bottom:6px"><b>LAN Discovery:</b> ${p.lan_discovery||'—'}</div>
+    <div style="margin-bottom:6px"><b>Auth:</b> ${p.auth||'None'}</div>
+    <div style="margin-bottom:8px"><b>API Endpoints:</b><br>${endpoints}</div>
+    <div style="margin-bottom:4px"><b>Remote Access (outside home):</b></div>
+    <div>• FlashForge: Use <b>FlashCloud</b> at flashforge.com/cloud — register printer, upload from browser anywhere.</div>
+    <div>• OctoPrint: Use <b>OctoEverywhere</b> or <b>Ngrok tunnel</b> for remote access.</div>
+    <div>• Moonraker/Klipper: Use <b>Cloudflare Tunnel</b> or <b>Tailscale VPN</b> for secure remote.</div>
+    <div>• Any: SSH tunnel → <code style="font-size:.72rem;background:#0a0c12;padding:1px 5px;border-radius:3px">ssh -L 8899:PRINTER_IP:8899 user@your_home_server</code></div>
+  `;
+}
+
+async function pingPrinter() {
+  const key  = document.getElementById('print-printer-key').value;
+  const host = document.getElementById('print-host').value;
+  if (!host) { statusErr('Enter printer IP/hostname first.'); return; }
+  statusBusy('Pinging '+host+'…');
+  const r = await fetch(API+'/api/print/ping', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      printer_key: key, host,
+      api_key: document.getElementById('print-apikey').value||null
+    })
+  });
+  const d = await r.json();
+  const online = d.result?.online;
+  document.getElementById('print-ping-result').innerHTML =
+    `<span style="color:${online?'var(--green)':'var(--red)'}">`+
+    `${online?'✓ Online':'✗ Offline'}</span>  ${host}`+
+    (d.result?.error?` — ${d.result.error}`:'');
+  if (online) statusOk('Printer online: '+host);
+  else statusErr('Printer offline: '+host);
+  renderRemoteGuide(key);
+}
+
+async function discoverPrinters() {
+  statusBusy('Scanning local network… (up to 5s)');
+  const r = await fetch(API+'/api/print/discover');
+  const d = await r.json();
+  if (!d.found.length) {
+    document.getElementById('print-ping-result').textContent = 'No printers found on LAN.';
+    statusErr('No printers discovered');
+  } else {
+    document.getElementById('print-ping-result').innerHTML =
+      d.found.map(p=>`✓ ${p.protocol} at ${p.ip}:${p.port}`).join('<br>');
+    // Auto-fill first found
+    document.getElementById('print-host').value = d.found[0].ip;
+    statusOk(`Found ${d.count} printer(s) on LAN`);
+  }
+}
+
+async function createPrintPackage() {
+  const key = document.getElementById('pkg-printer-key').value;
+  statusBusy('Creating print package…');
+  // Gather STL files from output listing
+  const fr = await fetch(API+'/api/outputs');
+  const fd = await fr.json();
+  const stls = fd.files
+    .filter(f=>f.ext==='.stl')
+    .map(f=>f.name);
+
+  if (!stls.length) {
+    statusErr('No STL files found — generate 3D files first (Blender).');
+    document.getElementById('pkg-status').textContent = 'No STL files in output/. Generate them first.';
+    return;
+  }
+
+  const r = await fetch(API+'/api/print/package', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      model_name: document.getElementById('model-name').value,
+      stl_files:  stls.map(f=>`output/${f}`),
+      printer_key: key,
+      geom: currentGeom,
+      spec: currentSpec,
+    })
+  });
+  const d = await r.json();
+  if (d.status==='ok') {
+    const zipName = d.package.zip_path.split('/').pop();
+    document.getElementById('pkg-status').innerHTML =
+      `✓ Package: <b>${zipName}</b> — `+
+      `<a href="${API}/api/download/${zipName}" target="_blank" style="color:var(--accent)">Download ZIP</a>`;
+    await refreshFiles();
+    statusOk('Print package ready: '+zipName);
+  } else {
+    statusErr('Package error: '+(d.detail||''));
+  }
+}
+
+async function refreshPrintFileList() {
+  const r = await fetch(API+'/api/outputs');
+  const d = await r.json();
+  const sel = document.getElementById('print-file-select');
+  sel.innerHTML = '';
+  const printable = d.files.filter(f=>['.gcode','.g','.gx','.stl','.zip'].includes(f.ext));
+  if (!printable.length) {
+    sel.innerHTML = '<option>No printable files yet</option>';
+    return;
+  }
+  printable.forEach(f=>{
+    const o = document.createElement('option');
+    o.value = f.name; o.textContent = `${f.name} (${f.size_kb}KB)`;
+    sel.appendChild(o);
+  });
+}
+
+async function uploadAndPrint() {
+  const key      = document.getElementById('print-printer-key').value;
+  const host     = document.getElementById('print-host').value;
+  const filename = document.getElementById('print-file-select').value;
+  if (!host)     { statusErr('Enter printer IP first.'); return; }
+  if (!filename) { statusErr('Select a file to print.'); return; }
+  statusBusy('Uploading to printer…');
+  const apiKey = document.getElementById('print-apikey').value||null;
+  const filePath = `output/${filename}`;
+  // Upload
+  let r = await fetch(API+'/api/print/upload', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({printer_key:key, host, api_key:apiKey, file_path:filePath, filename})
+  });
+  let d = await r.json();
+  if (!d.result?.success) {
+    statusErr('Upload failed: '+(d.result?.error||''));
+    document.getElementById('print-status-box').textContent = JSON.stringify(d, null, 2);
+    return;
+  }
+  statusBusy('Upload OK — starting print…');
+  // Start print
+  r = await fetch(API+'/api/print/start', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({printer_key:key, host, api_key:apiKey, file_path:filePath, filename})
+  });
+  d = await r.json();
+  if (d.result?.success) {
+    statusOk('Print started: '+filename);
+    document.getElementById('print-status-box').textContent = 'Print job started ✓\n'+JSON.stringify(d, null, 2);
+  } else {
+    statusErr('Print start failed: '+(d.result?.error||''));
+    document.getElementById('print-status-box').textContent = JSON.stringify(d, null, 2);
+  }
+}
+
+async function getPrinterStatus() {
+  const key  = document.getElementById('print-printer-key').value;
+  const host = document.getElementById('print-host').value;
+  if (!host) { statusErr('Enter printer IP first.'); return; }
+  const r = await fetch(API+'/api/print/status', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({printer_key:key, host, api_key:document.getElementById('print-apikey').value||null})
+  });
+  const d = await r.json();
+  document.getElementById('print-status-box').textContent = JSON.stringify(d.result||d, null, 2);
+  if (d.result?.online===false) statusErr('Printer offline');
+  else statusOk('Status received');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Custom PCB spec entry
+// ═══════════════════════════════════════════════════════
+let customPCBOpen = false;
+
+function toggleCustomPCB() {
+  customPCBOpen = !customPCBOpen;
+  document.getElementById('custom-pcb-form').style.display = customPCBOpen ? '' : 'none';
+  document.getElementById('custom-pcb-toggle').textContent =
+    (customPCBOpen ? '▼' : '▶') + ' Enter custom board dimensions';
+}
+
+function applyCustomPCB() {
+  const w    = parseFloat(document.getElementById('cpb-width').value)  || 65;
+  const h    = parseFloat(document.getElementById('cpb-height').value) || 30;
+  const diag = parseFloat(document.getElementById('cpb-diag').value)   || 1.3;
+  const resw = parseInt(document.getElementById('cpb-resw').value)     || 240;
+  const resh = parseInt(document.getElementById('cpb-resh').value)     || 240;
+  const iface  = document.getElementById('cpb-iface').value;
+  const ic     = document.getElementById('cpb-ic').value || 'ST7789';
+  const vendor = document.getElementById('cpb-vendor').value || 'custom';
+  const name   = document.getElementById('model-name').value || 'custom_handheld';
+
+  currentSpec = {
+    model:                name,
+    vendor:               vendor,
+    board_width_mm:       w,
+    board_height_mm:      h,
+    display_diagonal_inch: diag,
+    resolution_w:         resw,
+    resolution_h:         resh,
+    interface:            iface,
+    controller_ic:        ic,
+    spi_max_mhz:          62.5,
+    operating_voltage_v:  3.3,
+    compatible_boards:    ['RPi 4'],
+    button_positions_mm:  [[w*0.72, h*0.3],[w*0.82, h*0.3],[w*0.72, h*0.6],[w*0.82, h*0.6]],
+    joystick_diameter_mm: 10,
+    joystick_center_mm:   [w*0.6, h*0.5],
+    display_offset_x_mm:  2,
+    display_offset_y_mm:  2,
+  };
+
+  document.getElementById('spec-json').value = JSON.stringify(currentSpec, null, 2);
+  statusOk(`Custom spec applied: ${name}  (${w}×${h}mm)`);
+  // Deselect known HAT items
+  document.querySelectorAll('.device-item').forEach(i=>i.classList.remove('active'));
+}
+
+// ═══════════════════════════════════════════════════════
+//  Blender log polling
+// ═══════════════════════════════════════════════════════
+let blenderPollInterval = null;
+
+function startBlenderLogPoll() {
+  if (blenderPollInterval) {
+    clearInterval(blenderPollInterval);
+    blenderPollInterval = null;
+    document.getElementById('blender-log-status').textContent = '';
+    document.querySelector('[onclick="startBlenderLogPoll()"]').textContent = '🔄 Watch Blender Log';
+    return;
+  }
+  document.getElementById('blender-log-status').textContent = '● polling';
+  document.getElementById('blender-log-status').style.color = 'var(--green)';
+  document.querySelector('[onclick="startBlenderLogPoll()"]').textContent = '⏹ Stop Polling';
+  pollBlenderLog();
+  blenderPollInterval = setInterval(pollBlenderLog, 2500);
+}
+
+async function pollBlenderLog() {
+  if (!currentSpec) return;
+  const slug = (currentSpec.model||'handheld').replace(/ /g,'_').toLowerCase();
+  const logName = slug + '_blender.log';
+  try {
+    const r = await fetch(API+'/api/firmware/file?path='+encodeURIComponent('../output/'+logName));
+    // Try direct output download instead
+    const r2 = await fetch(API+'/api/download/'+encodeURIComponent(logName));
+    if (!r2.ok) { document.getElementById('log').textContent='Log not yet available.'; return; }
+    const text = await r2.text();
+    const el = document.getElementById('log');
+    el.textContent = text.slice(-3000); // show last 3KB
+    el.scrollTop = el.scrollHeight;
+    if (text.includes('Finished') || text.includes('Error') || text.includes('Blender quit')) {
+      clearInterval(blenderPollInterval);
+      blenderPollInterval = null;
+      document.getElementById('blender-log-status').textContent = '✓ done';
+      document.getElementById('blender-log-status').style.color = 'var(--green)';
+      document.querySelector('[onclick="startBlenderLogPoll()"]').textContent = '🔄 Watch Blender Log';
+      await refreshFiles();
+    }
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════
+//  Device save-slots (localStorage, up to 3)
+// ═══════════════════════════════════════════════════════
+const SAVE_KEY = 'handheld3d_saves';
+
+function getSaves() {
+  try { return JSON.parse(localStorage.getItem(SAVE_KEY)||'[]'); }
+  catch(e) { return []; }
+}
+
+function putSaves(arr) {
+  localStorage.setItem(SAVE_KEY, JSON.stringify(arr.slice(0,3)));
+}
+
+function saveBuild() {
+  if (!currentSpec) { statusErr('No spec loaded — run pipeline or select a device first.'); return; }
+  const name = document.getElementById('save-slot-name').value.trim() ||
+    currentSpec.model || 'Build';
+  const saves = getSaves().filter(s=>s.name!==name);
+  saves.unshift({
+    name,
+    spec:  currentSpec,
+    geom:  currentGeom,
+    build: currentBuild,
+    specs: currentSpecs,
+    pinout: currentPinout,
+    saved_at: new Date().toISOString(),
+  });
+  putSaves(saves);
+  document.getElementById('save-slot-name').value = '';
+  renderSavedBuilds();
+  statusOk(`Saved build: "${name}"`);
+}
+
+function loadSave(idx) {
+  const saves = getSaves();
+  const s = saves[idx];
+  if (!s) return;
+  currentSpec   = s.spec;
+  currentGeom   = s.geom;
+  currentBuild  = s.build;
+  currentSpecs  = s.specs;
+  currentPinout = s.pinout;
+  document.getElementById('spec-json').value = JSON.stringify(currentSpec||{}, null, 2);
+  if (currentGeom) {
+    buildShell3D(currentGeom);
+    renderGeomTable(currentGeom);
+  }
+  if (currentSpecs) renderSpecs(currentSpecs);
+  if (currentPinout) {
+    WIRE_COLOURS_JS = currentPinout.wire_colours||{};
+    renderGPIOMap(currentPinout.gpio_map||[]);
+    renderPinoutTables(currentPinout);
+    renderPowerBudget(currentPinout.power_budget);
+    renderSafety(currentPinout.safety_checklist||[]);
+    buildWiringDiagram(currentPinout);
+    renderConflicts(currentPinout.conflicts||[]);
+  }
+  statusOk(`Loaded build: "${s.name}"`);
+}
+
+function deleteSave(idx) {
+  const saves = getSaves();
+  saves.splice(idx,1);
+  putSaves(saves);
+  renderSavedBuilds();
+}
+
+function renderSavedBuilds() {
+  const el = document.getElementById('saved-builds-list');
+  const saves = getSaves();
+  if (!saves.length) {
+    el.innerHTML = '<span style="font-size:.78rem;color:var(--muted)">No saved builds yet.</span>';
+    return;
+  }
+  el.innerHTML = saves.map((s,i)=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:7px 10px">
+      <div>
+        <span style="font-weight:600;font-size:.8rem">${s.name}</span>
+        <span style="color:var(--muted);font-size:.7rem;margin-left:8px">${s.spec?.board_width_mm||'—'}×${s.spec?.board_height_mm||'—'}mm</span>
+        <div style="color:var(--muted);font-size:.7rem">${new Date(s.saved_at).toLocaleDateString()}</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <button class="btn btn-secondary" style="padding:3px 8px;font-size:.72rem" onclick="loadSave(${i})">Load</button>
+        <button class="btn btn-red" style="padding:3px 8px;font-size:.72rem" onclick="deleteSave(${i})">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+// Render saved builds on DOMContentLoaded
+document.addEventListener('DOMContentLoaded', ()=>{ renderSavedBuilds(); });
+</script>
+</body>
+</html>

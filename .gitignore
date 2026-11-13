@@ -1,0 +1,56 @@
+# Puromo — .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Generated output files (keep structure, ignore generated content)
+output/*.pdf
+output/*.zip
+output/*.stl
+output/*.blend
+output/*.log
+output/*.json
+output/*.md
+output/cache/
+
+# Keep generated firmware output tracked (useful for demos)
+# output/<model>/*.py  — tracked by default unless you add them here
+
+# Data cache
+data/devices/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Blender temp files
+*.blend1
+*.blend2
+
+# Logs
+*.log

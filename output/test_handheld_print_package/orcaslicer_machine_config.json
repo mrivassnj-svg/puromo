@@ -1,0 +1,32 @@
+{
+  "type": "machine",
+  "name": "Adventurer 5M",
+  "from": "Handheld 3D Shell Builder",
+  "nozzle_diameter": [
+    "0.4"
+  ],
+  "printable_area": [
+    "0x0",
+    "220x0",
+    "220x220",
+    "0x220"
+  ],
+  "printable_height": "220",
+  "max_layer_height": [
+    "0.35"
+  ],
+  "min_layer_height": [
+    "0.05"
+  ],
+  "extruder_type": [
+    "bowden"
+  ],
+  "default_filament_profile": [
+    "Handheld_PETG"
+  ],
+  "default_print_profile": [
+    "Handheld_0.2mm_PETG"
+  ],
+  "machine_start_gcode": "; --- Handheld Shell Start G-code ---\nM140 S{bed_temp}        ; Set bed temp\nM104 S{extruder_temp}   ; Set hotend temp\nG28                      ; Home all axes\nG29                      ; Auto bed levelling\nM190 S{bed_temp}        ; Wait for bed\nM109 S{extruder_temp}   ; Wait for hotend\nG92 E0                   ; Reset extruder\nG1 Z5.0 F3000\nG1 X0.1 Y20 Z0.3 F5000\nG1 X0.1 Y200 F1500 E15  ; Prime line\nG92 E0\n",
+  "machine_end_gcode": "; --- End G-code ---\nG91\nG1 Z10 F3000\nG90\nG28 X0\nM104 S0\nM140 S0\nM84\n"
+}
