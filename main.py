@@ -310,6 +310,46 @@ def hat_keys():
     return {"keys": list(WAVESHARE_LCD_HATS.keys())}
 
 
+@app.get("/api/search-devices")
+def search_devices(q: str = "", vendor: str = "waveshare"):
+    """
+    Fuzzy-search the known device database.
+    Returns all matching HATs ranked by relevance score.
+    Also attempts a Waveshare fuzzy lookup for instant best-match.
+    """
+    crawler = DeviceCrawler()
+    if not q:
+        # Return all known devices ranked by name
+        return {
+            "query": q,
+            "best_match": None,
+            "results": [
+                {"key": k, "model": v["model"], "score": 0,
+                 "board_mm": f"{v['board_width_mm']}×{v['board_height_mm']}",
+                 "display": f"{v['display_diagonal_inch']}\" {v['resolution_w']}×{v['resolution_h']}"}
+                for k, v in WAVESHARE_LCD_HATS.items()
+            ],
+        }
+
+    from crawler.device_crawler import _fuzzy_lookup
+    ranked = crawler.search_known_devices(q)
+    best_key = _fuzzy_lookup(q)
+    return {
+        "query": q,
+        "best_match": best_key,
+        "results": [
+            {
+                "key": key,
+                "model": model,
+                "score": score,
+                "board_mm": f"{WAVESHARE_LCD_HATS[key]['board_width_mm']}×{WAVESHARE_LCD_HATS[key]['board_height_mm']}",
+                "display": f"{WAVESHARE_LCD_HATS[key]['display_diagonal_inch']}\" {WAVESHARE_LCD_HATS[key]['resolution_w']}×{WAVESHARE_LCD_HATS[key]['resolution_h']}",
+            }
+            for key, model, score in ranked
+        ],
+    }
+
+
 @app.get("/api/header-variants")
 def header_variants():
     """Return all GPIO header variants with their physical dimensions."""

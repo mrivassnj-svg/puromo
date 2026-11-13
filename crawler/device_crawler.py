@@ -4,15 +4,24 @@ device_crawler.py
 Web crawler that scrapes handheld device / microcontroller / PCB specs
 from known sources (Waveshare, Adafruit, SparkFun, Arduino, RPi Foundation).
 Returns a normalised DeviceSpec dict ready for the dimension parser.
+
+Search strategy (in priority order):
+  1. Token-fuzzy match against WAVESHARE_LCD_HATS (handles typos, partial names,
+     numbers-only queries like "1.3", "240x240", "2inch", etc.)
+  2. Alias table lookup (handles common shorthand like "ws1.3", "hat13", etc.)
+  3. Local JSON cache
+  4. Live web crawl with HTML scraping + regex extraction
+  5. Zero-dimension fallback with vendor + model name preserved
 """
 
 import re
 import time
 import json
+import math
 import logging
 from dataclasses import dataclass, field, asdict
-from typing import Optional
-from urllib.parse import urljoin, urlparse
+from typing import Optional, List, Dict, Tuple
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -69,16 +78,13 @@ VENDOR_PATTERNS = {
 
 # ---------------------------------------------------------------------------
 # GPIO header / installed component catalogue
-# All heights are from PCB surface (not pin tip).
-# above_mm = height of plastic housing above top PCB surface
-# below_mm = pin length protruding below bottom PCB surface (soldering clearance)
 # ---------------------------------------------------------------------------
 GPIO_HEADER_VARIANTS = {
     "standard_11mm": {
         "label":        "Standard 11mm (RPi HAT default)",
-        "above_mm":     8.5,    # plastic housing above PCB
-        "below_mm":     3.0,    # pins below PCB
-        "mated_gap_mm": 11.5,   # board-to-board gap when HAT is mated
+        "above_mm":     8.5,
+        "below_mm":     3.0,
+        "mated_gap_mm": 11.5,
         "note":         "Standard 2×20 female header shipped with most HATs",
     },
     "tall_15mm": {
@@ -113,14 +119,14 @@ GPIO_HEADER_VARIANTS = {
         "label":        "Soldered direct (no header)",
         "above_mm":     0.0,
         "below_mm":     0.0,
-        "mated_gap_mm": 1.0,    # only solder joint gap
+        "mated_gap_mm": 1.0,
         "note":         "HAT soldered flat to host board — minimal height, non-removable",
     },
     "gpio_ribbon": {
         "label":        "GPIO ribbon cable + 11mm standoffs",
-        "above_mm":     2.5,    # only IDC connector height on HAT side
+        "above_mm":     2.5,
         "below_mm":     0.0,
-        "mated_gap_mm": 11.5,   # standoff-controlled gap
+        "mated_gap_mm": 11.5,
         "note":         "Host board connected via flat ribbon; HAT mounted on standoffs",
     },
     "pogo_pin": {
@@ -132,9 +138,6 @@ GPIO_HEADER_VARIANTS = {
     },
 }
 
-# Through-hole / SMD components that add clearance above PCB surface.
-# These are measured as height above the TOP surface of the PCB.
-# Used to compute the minimum internal cavity depth needed.
 COMMON_COMPONENT_HEIGHTS = {
     "usb_a":          {"h_mm": 14.5, "label": "USB-A connector (vertical)"},
     "usb_micro":      {"h_mm":  3.5, "label": "Micro USB connector"},
@@ -170,32 +173,23 @@ DIM_PATTERNS = {
                                  re.IGNORECASE),
     "display_mm":     re.compile(r"(?:active\s*area|viewing\s*area)[:\s]*([\d.]+)\s*[×xX]\s*([\d.]+)\s*mm",
                                  re.IGNORECASE),
-    "mounting_holes": re.compile(r"mounting\s*holes?[:\s]*([\d.]+)\s*mm",
-                                 re.IGNORECASE),
-    "weight":         re.compile(r"weight[:\s]*([\d.]+)\s*g",
-                                 re.IGNORECASE),
+    "mounting_holes": re.compile(r"mounting\s*holes?[:\s]*([\d.]+)\s*mm", re.IGNORECASE),
+    "weight":         re.compile(r"weight[:\s]*([\d.]+)\s*g", re.IGNORECASE),
     "voltage":        re.compile(r"(?:operating|input|supply)\s*voltage[:\s]*([\d.]+)\s*[-–to]?\s*([\d.]+)?\s*[Vv]",
                                  re.IGNORECASE),
-    "interface":      re.compile(r"(?:interface|communication)[:\s]*([A-Za-z0-9,/ ]+)",
+    "interface":      re.compile(r"(?:interface|communication)[:\s]*([A-Za-z0-9,/ ]+)", re.IGNORECASE),
+    "header_height":  re.compile(r"(?:gpio\s*header|pin\s*header|header)[:\s]*.*?(\d+(?:\.\d+)?)\s*mm",
                                  re.IGNORECASE),
-    # Header / component height patterns
-    "header_height":  re.compile(
-        r"(?:gpio\s*header|pin\s*header|header)[:\s]*.*?(\d+(?:\.\d+)?)\s*mm",
-        re.IGNORECASE),
-    "standoff_height":re.compile(
-        r"(?:standoff|spacer)[:\s]*.*?(\d+(?:\.\d+)?)\s*mm",
-        re.IGNORECASE),
-    "component_height":re.compile(
-        r"(?:component\s*height|tallest\s*component|max\s*height)[:\s]*([\d.]+)\s*mm",
-        re.IGNORECASE),
-    "header_variant": re.compile(
-        r"(low[\s-]?profile|tall|stacking|standard)\s*(?:gpio\s*)?(?:pin\s*)?header",
-        re.IGNORECASE),
+    "standoff_height":re.compile(r"(?:standoff|spacer)[:\s]*.*?(\d+(?:\.\d+)?)\s*mm", re.IGNORECASE),
+    "component_height":re.compile(r"(?:component\s*height|tallest\s*component|max\s*height)[:\s]*([\d.]+)\s*mm",
+                                  re.IGNORECASE),
+    "header_variant": re.compile(r"(low[\s-]?profile|tall|stacking|standard)\s*(?:gpio\s*)?(?:pin\s*)?header",
+                                 re.IGNORECASE),
 }
 
-# Waveshare LCD HAT specific known dimensions (hardcoded fallback + math basis)
-# gpio_header_* fields reflect the standard 11mm female header shipped with each HAT.
-# Override gpio_header_variant in the UI or spec JSON to use a different header.
+# ---------------------------------------------------------------------------
+# Waveshare LCD HAT hardcoded specs
+# ---------------------------------------------------------------------------
 WAVESHARE_LCD_HATS = {
     "1.3inch_lcd_hat": {
         "model": "Waveshare 1.3inch LCD HAT",
@@ -207,39 +201,27 @@ WAVESHARE_LCD_HATS = {
         "display_height_mm": 23.4,
         "resolution_w": 240,
         "resolution_h": 240,
-        "pixel_pitch_mm": 0.0975,       # 23.4mm / 240px
+        "pixel_pitch_mm": 0.0975,
         "ppi": 260.6,
         "gpio_header_pitch_mm": 2.54,
         "gpio_rows": 2,
-        "gpio_cols": 20,                # 40-pin 2×20
-        # Installed header — standard 11mm female header (HAT side)
+        "gpio_cols": 20,
         "gpio_header_variant":    "standard_11mm",
-        "gpio_header_above_mm":   8.5,   # housing protrudes 8.5mm above HAT PCB
-        "gpio_header_below_mm":   3.0,   # pins protrude 3mm below HAT PCB
-        "gpio_header_mated_gap_mm": 11.5, # RPi PCB → HAT PCB gap when mated
-        # Tallest other component on the HAT (joystick nub above board surface)
+        "gpio_header_above_mm":   8.5,
+        "gpio_header_below_mm":   3.0,
+        "gpio_header_mated_gap_mm": 11.5,
         "tallest_component_mm":   8.0,
         "tallest_component_label":"5-way joystick nub",
-        # Components needing edge clearance
         "installed_components": [
             {"key": "button_tact", "h_mm": 5.0, "label": "KEY1", "edge": "right", "pos_mm": 8.5},
             {"key": "button_tact", "h_mm": 5.0, "label": "KEY2", "edge": "right", "pos_mm": 15.0},
             {"key": "button_tact", "h_mm": 5.0, "label": "KEY3", "edge": "right", "pos_mm": 21.5},
         ],
         "mounting_hole_diameter_mm": 2.9,
-        "mounting_hole_positions_mm": [  # (x, y) from bottom-left corner
-            (3.5, 3.5),
-            (61.5, 3.5),
-            (3.5, 26.6),
-            (61.5, 26.6),
-        ],
+        "mounting_hole_positions_mm": [(3.5,3.5),(61.5,3.5),(3.5,26.6),(61.5,26.6)],
         "joystick_center_mm": (40.0, 15.0),
         "joystick_diameter_mm": 12.0,
-        "button_positions_mm": [        # (x, y, label)
-            (55.0, 8.5,  "KEY1"),
-            (55.0, 15.0, "KEY2"),
-            (55.0, 21.5, "KEY3"),
-        ],
+        "button_positions_mm": [(55.0,8.5,"KEY1"),(55.0,15.0,"KEY2"),(55.0,21.5,"KEY3")],
         "interface": "SPI",
         "controller_ic": "ST7789",
         "voltage_v": 3.3,
@@ -268,12 +250,7 @@ WAVESHARE_LCD_HATS = {
         "tallest_component_label":"tactile button",
         "installed_components": [],
         "mounting_hole_diameter_mm": 2.9,
-        "mounting_hole_positions_mm": [
-            (3.5, 3.5),
-            (61.5, 3.5),
-            (3.5, 26.6),
-            (61.5, 26.6),
-        ],
+        "mounting_hole_positions_mm": [(3.5,3.5),(61.5,3.5),(3.5,26.6),(61.5,26.6)],
         "interface": "SPI",
         "controller_ic": "ST7789",
         "voltage_v": 3.3,
@@ -303,13 +280,117 @@ WAVESHARE_LCD_HATS = {
         "tallest_component_label":"5-way joystick nub",
         "installed_components": [],
         "mounting_hole_diameter_mm": 2.9,
-        "mounting_hole_positions_mm": [
-            (3.5, 3.5), (61.5, 3.5), (3.5, 26.7), (61.5, 26.7),
-        ],
+        "mounting_hole_positions_mm": [(3.5,3.5),(61.5,3.5),(3.5,26.7),(61.5,26.7)],
         "compatible_boards": ["Raspberry Pi Zero", "RPi 3", "RPi 4", "RPi 5"],
     },
 }
 
+# ---------------------------------------------------------------------------
+# Search alias table — maps common shorthand / typos → canonical HAT key
+# Any number of aliases can point to the same key.
+# ---------------------------------------------------------------------------
+_HAT_ALIASES: Dict[str, str] = {
+    # 1.3-inch
+    "1.3":          "1.3inch_lcd_hat",
+    "1.3inch":      "1.3inch_lcd_hat",
+    "1.3 inch":     "1.3inch_lcd_hat",
+    "1.3\"":        "1.3inch_lcd_hat",
+    "ws1.3":        "1.3inch_lcd_hat",
+    "hat13":        "1.3inch_lcd_hat",
+    "lcd13":        "1.3inch_lcd_hat",
+    "st7789":       "1.3inch_lcd_hat",
+    "240x240":      "1.3inch_lcd_hat",
+    "240 240":      "1.3inch_lcd_hat",
+    # 2-inch
+    "2inch":        "2inch_lcd_hat",
+    "2.0":          "2inch_lcd_hat",
+    "2.0inch":      "2inch_lcd_hat",
+    "2 inch":       "2inch_lcd_hat",
+    "2\"":          "2inch_lcd_hat",
+    "ws2":          "2inch_lcd_hat",
+    "240x320":      "2inch_lcd_hat",
+    "240 320":      "2inch_lcd_hat",
+}
+
+# Tokens that appear in every model name and add no search signal
+_STOP_WORDS = {"waveshare", "lcd", "hat", "inch", "display", "screen", "rpi", "raspberry", "pi", "board"}
+
+
+def _tokenise(text: str) -> List[str]:
+    """Lowercase, strip punctuation, split on whitespace and separators."""
+    text = text.lower()
+    text = re.sub(r"[_\-×xX*,]", " ", text)
+    text = re.sub(r"[^a-z0-9. ]", "", text)
+    return [t for t in text.split() if t]
+
+
+def _search_score(query_tokens: List[str], candidate_key: str, candidate_data: dict) -> int:
+    """
+    Score a candidate HAT against query tokens.
+    Higher = better match.
+    """
+    candidate_tokens = _tokenise(candidate_key) + _tokenise(candidate_data["model"])
+    score = 0
+    for qt in query_tokens:
+        for ct in candidate_tokens:
+            if qt == ct:
+                score += 10         # exact token match
+            elif qt in ct or ct in qt:
+                score += 5          # substring match
+            elif qt.rstrip("s") == ct.rstrip("s"):
+                score += 3          # plural/singular
+            # numeric proximity: "1.3" vs "1.3inch" — both contain "1.3"
+            if re.search(r'\d', qt) and qt in ct:
+                score += 8
+    return score
+
+
+def _fuzzy_lookup(query: str) -> Optional[str]:
+    """
+    Return the best-matching WAVESHARE_LCD_HATS key for a query string,
+    or None if the best score is too low to be confident.
+    """
+    q_clean = query.strip().lower()
+
+    # 1. Direct alias table lookup (fastest path)
+    if q_clean in _HAT_ALIASES:
+        return _HAT_ALIASES[q_clean]
+    # Partial alias match
+    for alias, key in _HAT_ALIASES.items():
+        if alias in q_clean or q_clean in alias:
+            return key
+
+    # 2. Direct key match (after normalisation)
+    q_slug = re.sub(r"[^a-z0-9.]", "_", q_clean)
+    for key in WAVESHARE_LCD_HATS:
+        if key == q_slug or key in q_slug or q_slug in key:
+            return key
+
+    # 3. Model name substring match
+    for key, data in WAVESHARE_LCD_HATS.items():
+        if q_clean in data["model"].lower() or data["model"].lower() in q_clean:
+            return key
+
+    # 4. Token scoring
+    q_tokens = [t for t in _tokenise(q_clean) if t not in _STOP_WORDS]
+    if not q_tokens:
+        # All stop words — fall back to first entry
+        return list(WAVESHARE_LCD_HATS.keys())[0]
+
+    scores = {
+        key: _search_score(q_tokens, key, data)
+        for key, data in WAVESHARE_LCD_HATS.items()
+    }
+    best_key = max(scores, key=lambda k: scores[k])
+    best_score = scores[best_key]
+
+    # Require a minimum confidence score of 3 to avoid spurious matches
+    return best_key if best_score >= 3 else None
+
+
+# ---------------------------------------------------------------------------
+# DeviceSpec dataclass
+# ---------------------------------------------------------------------------
 
 @dataclass
 class DeviceSpec:
@@ -318,12 +399,10 @@ class DeviceSpec:
     vendor: str = ""
     source_url: str = ""
 
-    # PCB / board physical
     board_width_mm: float = 0.0
     board_height_mm: float = 0.0
     board_thickness_mm: float = 1.6
 
-    # Display (if applicable)
     display_diagonal_inch: float = 0.0
     display_width_mm: float = 0.0
     display_height_mm: float = 0.0
@@ -332,56 +411,44 @@ class DeviceSpec:
     pixel_pitch_mm: float = 0.0
     ppi: float = 0.0
 
-    # Mounting
     mounting_hole_diameter_mm: float = 2.9
     mounting_hole_positions_mm: list = field(default_factory=list)
 
-    # Electrical
     voltage_v: float = 3.3
     interface: str = ""
     controller_ic: str = ""
 
-    # GPIO
     gpio_header_pitch_mm: float = 2.54
     gpio_rows: int = 0
     gpio_cols: int = 0
 
-    # Installed header — the physical header variant actually fitted to the board.
-    # This drives shell depth calculation in dimension_math.py.
-    gpio_header_variant: str = "standard_11mm"   # key into GPIO_HEADER_VARIANTS
-    gpio_header_above_mm: float = 8.5            # housing height above PCB top surface
-    gpio_header_below_mm: float = 3.0            # pin length below PCB bottom surface
-    gpio_header_mated_gap_mm: float = 11.5       # board-to-board gap when HAT mated
+    gpio_header_variant: str = "standard_11mm"
+    gpio_header_above_mm: float = 8.5
+    gpio_header_below_mm: float = 3.0
+    gpio_header_mated_gap_mm: float = 11.5
 
-    # Tallest component above PCB top surface (excluding GPIO header).
-    # Used to ensure shell cavity is deep enough.
     tallest_component_mm: float = 0.0
     tallest_component_label: str = ""
 
-    # List of installed components that need clearance / edge cutouts.
-    # Each entry: {"key": str, "h_mm": float, "label": str, "edge": str, "pos_mm": float}
     installed_components: list = field(default_factory=list)
 
-    # UI elements
     button_positions_mm: list = field(default_factory=list)
     joystick_center_mm: tuple = field(default_factory=tuple)
     joystick_diameter_mm: float = 0.0
 
-    # Compatibility
     compatible_boards: list = field(default_factory=list)
 
-    # Raw scraped text for audit
     raw_specs: dict = field(default_factory=dict)
 
     def to_dict(self):
         return asdict(self)
 
 
+# ---------------------------------------------------------------------------
+# DeviceCrawler
+# ---------------------------------------------------------------------------
+
 class DeviceCrawler:
-    """
-    Crawls vendor pages or uses local known-device database to retrieve
-    full DeviceSpec objects for 3D shell generation.
-    """
 
     HEADERS = {
         "User-Agent": (
@@ -389,7 +456,7 @@ class DeviceCrawler:
             "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
         )
     }
-    REQUEST_DELAY = 1.5  # seconds between requests (polite crawling)
+    REQUEST_DELAY = 1.5
 
     def __init__(self, cache_dir: str = "data/devices"):
         self.cache_dir = cache_dir
@@ -402,33 +469,73 @@ class DeviceCrawler:
 
     def get_device(self, query: str, vendor: str = "waveshare") -> DeviceSpec:
         """
-        Main entry. Tries local known-device DB first, then live crawl.
-        Returns a fully populated DeviceSpec.
+        Main entry point. Resolution order:
+          1. Waveshare HAT fuzzy lookup (handles typos, partial names, numbers)
+          2. Local JSON cache
+          3. Live web crawl
+          4. Graceful zero-spec fallback (never crashes geometry engine)
         """
-        # 1. Check Waveshare HAT hardcoded DB
-        slug = query.lower().replace(" ", "_")
-        if vendor == "waveshare":
-            for key, data in WAVESHARE_LCD_HATS.items():
-                if key in slug or slug in key or query.lower() in data["model"].lower():
-                    logger.info(f"[DB hit] {data['model']}")
-                    spec = DeviceSpec(**{k: v for k, v in data.items()
-                                        if k in DeviceSpec.__dataclass_fields__})
-                    spec.vendor = "waveshare"
-                    return spec
+        # ── 1. Waveshare DB fuzzy lookup ──────────────────────────────
+        if vendor in ("waveshare", ""):
+            matched_key = _fuzzy_lookup(query)
+            if matched_key:
+                data = WAVESHARE_LCD_HATS[matched_key]
+                logger.info(f"[DB hit] '{query}' → {matched_key} ({data['model']})")
+                spec = DeviceSpec(**{
+                    k: v for k, v in data.items()
+                    if k in DeviceSpec.__dataclass_fields__
+                })
+                spec.vendor = "waveshare"
+                spec.raw_specs = {
+                    "source": "hardcoded_db",
+                    "matched_key": matched_key,
+                    "query": query,
+                }
+                return spec
 
-        # 2. Try cached JSON
+        # ── 2. Try JSON cache ─────────────────────────────────────────
         cached = self._load_cache(query, vendor)
         if cached:
             return cached
 
-        # 3. Live crawl
-        spec = self._crawl(query, vendor)
-        self._save_cache(query, vendor, spec)
-        return spec
+        # ── 3. Live crawl ─────────────────────────────────────────────
+        try:
+            spec = self._crawl(query, vendor)
+            if spec.board_width_mm > 0:          # only cache successful scrapes
+                self._save_cache(query, vendor, spec)
+            return spec
+        except Exception as e:
+            logger.warning(f"[Crawl] failed for '{query}': {e}")
+
+        # ── 4. Graceful fallback — return a minimal valid spec ────────
+        logger.warning(f"[Fallback] returning empty spec for '{query}'")
+        return DeviceSpec(
+            model=query or "Unknown Device",
+            vendor=vendor,
+            board_width_mm=65.0,
+            board_height_mm=30.0,
+            board_thickness_mm=1.6,
+            gpio_header_variant="standard_11mm",
+            gpio_header_above_mm=8.5,
+            gpio_header_below_mm=3.0,
+            gpio_header_mated_gap_mm=11.5,
+            raw_specs={"source": "fallback", "query": query},
+        )
 
     def list_known_devices(self) -> list:
-        """Returns list of all hardcoded Waveshare HAT models."""
         return [v["model"] for v in WAVESHARE_LCD_HATS.values()]
+
+    def search_known_devices(self, query: str) -> List[Tuple[str, str, int]]:
+        """
+        Return (key, model_name, score) tuples for all known HATs, sorted by score descending.
+        Useful for the UI to show ranked suggestions.
+        """
+        q_tokens = [t for t in _tokenise(query) if t not in _STOP_WORDS] or _tokenise(query)
+        results = []
+        for key, data in WAVESHARE_LCD_HATS.items():
+            score = _search_score(q_tokens, key, data)
+            results.append((key, data["model"], score))
+        return sorted(results, key=lambda x: x[2], reverse=True)
 
     # ------------------------------------------------------------------
     # Internal crawling
@@ -447,8 +554,6 @@ class DeviceCrawler:
             return DeviceSpec(model=query, vendor=vendor)
 
         soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Find first product link
         product_url = self._find_product_link(soup, cfg["base_url"], query)
         if not product_url:
             logger.warning("No product page found.")
@@ -471,11 +576,9 @@ class DeviceCrawler:
         return spec
 
     def _find_product_link(self, soup: BeautifulSoup, base_url: str, query: str) -> Optional[str]:
-        """Heuristically find the most relevant product link on a search results page."""
         query_words = query.lower().split()
         best_link = None
         best_score = 0
-
         for a in soup.find_all("a", href=True):
             href = a["href"]
             text = a.get_text(strip=True).lower()
@@ -483,7 +586,6 @@ class DeviceCrawler:
             if score > best_score:
                 best_score = score
                 best_link = href
-
         if best_link:
             if best_link.startswith("http"):
                 return best_link
@@ -491,23 +593,19 @@ class DeviceCrawler:
         return None
 
     def _extract_spec_text(self, soup: BeautifulSoup, selectors: list) -> str:
-        """Collect all spec text from known selector patterns."""
         parts = []
         for sel in selectors:
-            tag, *cls = sel.split(".")
             for el in soup.select(sel):
                 parts.append(el.get_text(separator=" ", strip=True))
-        # Also grab full page text as fallback
         parts.append(soup.get_text(separator="\n", strip=True))
         return "\n".join(parts)
 
     def _parse_dimensions(self, text: str) -> DeviceSpec:
-        """Apply all regex patterns to raw text and build a DeviceSpec."""
         spec = DeviceSpec()
 
         m = DIM_PATTERNS["board_size"].search(text)
         if m:
-            spec.board_width_mm = float(m.group(1))
+            spec.board_width_mm  = float(m.group(1))
             spec.board_height_mm = float(m.group(2))
             if m.group(3):
                 spec.board_thickness_mm = float(m.group(3))
@@ -523,14 +621,12 @@ class DeviceCrawler:
 
         m = DIM_PATTERNS["display_mm"].search(text)
         if m:
-            spec.display_width_mm = float(m.group(1))
+            spec.display_width_mm  = float(m.group(1))
             spec.display_height_mm = float(m.group(2))
 
-        # Compute pixel pitch and PPI when we have resolution + mm size
         if spec.display_width_mm and spec.resolution_w:
             spec.pixel_pitch_mm = round(spec.display_width_mm / spec.resolution_w, 6)
         if spec.display_diagonal_inch and spec.resolution_w and spec.resolution_h:
-            import math
             diag_px = math.sqrt(spec.resolution_w**2 + spec.resolution_h**2)
             spec.ppi = round(diag_px / spec.display_diagonal_inch, 2)
 
@@ -542,43 +638,35 @@ class DeviceCrawler:
         if m:
             spec.interface = m.group(1).strip()
 
-        # --- Installed header detection ---
-        # 1. Try to identify header variant from descriptive text
         m = DIM_PATTERNS["header_variant"].search(text)
         if m:
             keyword = m.group(1).lower().replace("-", "").replace(" ", "")
             if "lowprofile" in keyword or "low" in keyword:
-                # Pick 8mm as default low-profile guess
                 variant_key = "low_profile_8mm"
             elif "tall" in keyword or "stacking" in keyword:
                 variant_key = "tall_15mm"
             else:
                 variant_key = "standard_11mm"
             hv = GPIO_HEADER_VARIANTS[variant_key]
-            spec.gpio_header_variant    = variant_key
-            spec.gpio_header_above_mm   = hv["above_mm"]
-            spec.gpio_header_below_mm   = hv["below_mm"]
+            spec.gpio_header_variant      = variant_key
+            spec.gpio_header_above_mm     = hv["above_mm"]
+            spec.gpio_header_below_mm     = hv["below_mm"]
             spec.gpio_header_mated_gap_mm = hv["mated_gap_mm"]
 
-        # 2. Try to extract explicit header height in mm
         m = DIM_PATTERNS["header_height"].search(text)
         if m:
             h = float(m.group(1))
-            # Find the closest matching variant by mated_gap_mm
-            best_key = min(
-                GPIO_HEADER_VARIANTS,
-                key=lambda k: abs(GPIO_HEADER_VARIANTS[k]["mated_gap_mm"] - h)
-            )
+            best_key = min(GPIO_HEADER_VARIANTS,
+                           key=lambda k: abs(GPIO_HEADER_VARIANTS[k]["mated_gap_mm"] - h))
             hv = GPIO_HEADER_VARIANTS[best_key]
             spec.gpio_header_variant      = best_key
             spec.gpio_header_above_mm     = hv["above_mm"]
             spec.gpio_header_below_mm     = hv["below_mm"]
             spec.gpio_header_mated_gap_mm = hv["mated_gap_mm"]
 
-        # 3. Explicit tallest-component height
         m = DIM_PATTERNS["component_height"].search(text)
         if m:
-            spec.tallest_component_mm   = float(m.group(1))
+            spec.tallest_component_mm    = float(m.group(1))
             spec.tallest_component_label = "scraped from spec page"
 
         spec.raw_specs = {
