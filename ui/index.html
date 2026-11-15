@@ -1412,6 +1412,8 @@ async function doCrawl(key) {
     currentSpec=d.spec;
     document.getElementById('spec-json').value=JSON.stringify(currentSpec,null,2);
     statusOk('Spec loaded: '+currentSpec.model);
+    // Auto-compute geometry and update 3D viewer immediately
+    await computeGeometry();
   } catch(e){ statusErr('Crawl failed: '+e.message); }
 }
 
