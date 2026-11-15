@@ -175,7 +175,23 @@ def compute_geometry(req: GeometryRequest):
     try:
         math_engine = DimensionMath(req.spec)
         geom = math_engine.compute()
-        return {"status": "ok", "geometry": dataclasses.asdict(geom)}
+        geom_dict = dataclasses.asdict(geom)
+        # Pass raw spec board/component fields through so the UI can render
+        # exact-position board replicas without a second API call.
+        PASSTHROUGH = [
+            "board_width_mm", "board_height_mm", "board_thickness_mm",
+            "display_width_mm", "display_height_mm",
+            "display_offset_x_mm", "display_offset_y_mm",
+            "joystick_center_mm", "joystick_diameter_mm",
+            "button_positions_mm", "mounting_hole_positions_mm",
+            "mounting_hole_diameter_mm",
+            "gpio_header_above_mm", "gpio_rows", "gpio_cols",
+            "gpio_header_pitch_mm", "controller_ic", "model",
+        ]
+        for key in PASSTHROUGH:
+            if key in req.spec and key not in geom_dict:
+                geom_dict[key] = req.spec[key]
+        return {"status": "ok", "geometry": geom_dict}
     except Exception as e:
         logger.exception("Geometry compute failed")
         raise HTTPException(status_code=500, detail=str(e))

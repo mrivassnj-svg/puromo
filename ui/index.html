@@ -742,21 +742,42 @@ function buildShell3D(geom) {
   scene.add(wallGroup);
   shellObjects.walls = wallGroup;
 
-  // ── PCB layer — always visible, sits at correct standoff height ──
-  const pcbY = FT + SOH;   // bottom face of PCB
+  // ── PCB layer — always visible, positioned using exact spec coordinates ──
+  // pcb_offset_x/y from geometry = wall_thickness + pcb_clearance = exact shell-local origin of PCB corner
+  const OX = geom.pcb_offset_x || (WT + 0.5);   // PCB left edge in shell X
+  const OZ = geom.pcb_offset_y || (WT + 0.5);   // PCB front edge in shell Z
+  const pcbY = FT + SOH;                         // bottom face of PCB
 
-  // FR4 board substrate
+  // FR4 board — exact board dimensions, copper-green colour
   const pcbGeo = new THREE.BoxGeometry(BW, BT, BH);
   const pcbMesh = new THREE.Mesh(pcbGeo, mat('#1b4a1b', 1.0, 30));
-  pcbMesh.position.set(BW/2, pcbY + BT/2, BH/2);
+  pcbMesh.position.set(OX + BW/2, pcbY + BT/2, OZ + BH/2);
   pcbMesh.name = 'pcb_placeholder';
   scene.add(pcbMesh);
   shellObjects.pcb = pcbMesh;
 
-  // Mounting bosses (standoffs)
+  // Copper trace highlight strips (top/bottom edge, left/right edge — 0.3mm thick)
+  const traceGroup = new THREE.Group();
+  [[BW, 0.3, 0.5, OX+BW/2, pcbY+BT, OZ+0.25],       // front edge trace
+   [BW, 0.3, 0.5, OX+BW/2, pcbY+BT, OZ+BH-0.25],    // back edge trace
+   [0.5, 0.3, BH, OX+0.25, pcbY+BT, OZ+BH/2],        // left edge trace
+   [0.5, 0.3, BH, OX+BW-0.25, pcbY+BT, OZ+BH/2],    // right edge trace
+  ].forEach(([tw,th,td,px,py,pz])=>{
+    const t = new THREE.Mesh(new THREE.BoxGeometry(tw,th,td), mat('#b87333', 1.0, 80));
+    t.position.set(px,py,pz);
+    traceGroup.add(t);
+  });
+  scene.add(traceGroup);
+
+  // Mounting bosses — driven by geometry.mounting_bosses (already shell-coord)
   const bossGroup = new THREE.Group();
   (geom.mounting_bosses||[]).forEach(b=>{
-    const bg = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, SOH, 16);
+    // Annular copper ring on PCB
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry((b.r||2.5)+1.0, (b.r||2.5)+1.0, 0.1, 20), mat('#b87333', 1.0, 80));
+    ring.position.set(b.cx, pcbY+BT+0.05, b.cy);
+    bossGroup.add(ring);
+    // Standoff pillar
+    const bg = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, SOH, 20);
     const bm = new THREE.Mesh(bg, mat(SHELL_PARTS.stand.colour));
     bm.position.set(b.cx, FT + SOH/2, b.cy);
     bossGroup.add(bm);
@@ -764,92 +785,155 @@ function buildShell3D(geom) {
   scene.add(bossGroup);
   shellObjects.bosses = bossGroup;
 
-  // ── Components on PCB — immediately visible ──
+  // ── Components — all placed using raw spec PCB-local positions + OX/OZ offset ──
   const compGroup = new THREE.Group();
   const compY = pcbY + BT;   // top face of PCB
 
-  // Display module (silver bezel + dark screen + blue glow)
+  // ── Display module ──
+  // Use exact display dimensions from spec; position from display_cutout (already shell-coord)
+  // display_cutout.x/y is the shell-coord of the cutout — the display sits directly below it
   const dc = geom.display_cutout;
-  if (dc && dc.w > 0) {
+  const DW = geom.display_width_mm  || (dc ? dc.w + 1.6 : 23.4);
+  const DH = geom.display_height_mm || (dc ? dc.h + 1.6 : 23.4);
+  if (DW > 0) {
+    // Display is on the left third of board (Waveshare HAT layout)
+    // display_cutout center maps back to board: cx = dc.x + dc.w/2
+    const dispCX = dc && dc.w > 0 ? dc.x + dc.w/2 : OX + BW * 0.33;
+    const dispCZ = dc && dc.h > 0 ? dc.y + dc.h/2 : OZ + BH / 2;
     const BEZEL = 1.2;
-    // Bezel body
+    const MOD_H = 1.6;   // display module body thickness
+    const SCR_H = 0.8;   // screen glass thickness
+    // Silver bezel/module body
     const dispBody = new THREE.Mesh(
-      new THREE.BoxGeometry(dc.w + 2*BEZEL, 1.6, dc.h + 2*BEZEL),
-      mat('#aaaaaa', 1.0, 80)
-    );
-    dispBody.position.set(dc.x + dc.w/2, compY + 0.8, dc.y + dc.h/2);
+      new THREE.BoxGeometry(DW + 2*BEZEL, MOD_H, DH + 2*BEZEL), mat('#9a9a9f', 1.0, 80));
+    dispBody.position.set(dispCX, compY + MOD_H/2, dispCZ);
     compGroup.add(dispBody);
-    // Screen glass
+    // Black screen glass (exact active area)
     const screen = new THREE.Mesh(
-      new THREE.BoxGeometry(dc.w, 0.8, dc.h),
-      mat('#050508', 1.0, 120)
-    );
-    screen.position.set(dc.x + dc.w/2, compY + 1.6, dc.y + dc.h/2);
+      new THREE.BoxGeometry(DW, SCR_H, DH), mat('#04040a', 1.0, 150));
+    screen.position.set(dispCX, compY + MOD_H, dispCZ);
     compGroup.add(screen);
-    // IPS glow
+    // IPS backlight glow (blue-white, slightly inset)
     const glow = new THREE.Mesh(
-      new THREE.BoxGeometry(dc.w - 1, 0.15, dc.h - 1),
-      mat('#2255aa', 0.75, 0)
-    );
-    glow.position.set(dc.x + dc.w/2, compY + 1.65, dc.y + dc.h/2);
+      new THREE.BoxGeometry(DW - 1.0, 0.12, DH - 1.0), mat('#1a4488', 0.80, 0));
+    glow.position.set(dispCX, compY + MOD_H + 0.06, dispCZ);
     compGroup.add(glow);
+    // FPC ribbon cable exiting bottom of module
+    const ribW = DW * 0.5;
+    const ribL = 8.0;
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(ribW, 0.3, ribL), mat('#c8a820', 0.9, 40));
+    rib.position.set(dispCX, compY + 0.15, dispCZ - DH/2 - ribL/2);
+    compGroup.add(rib);
   }
 
-  // 40-pin GPIO header (black block + gold highlight)
-  const hdrBody = new THREE.Mesh(
-    new THREE.BoxGeometry(51.0, 8.5, 5.1),
-    mat('#111118', 1.0, 20)
-  );
-  hdrBody.position.set(7.1 + 51.0/2, compY + 4.25, 3.5 + 5.1/2);
-  compGroup.add(hdrBody);
-  // Gold pin strip
-  const pinStrip = new THREE.Mesh(
-    new THREE.BoxGeometry(49.0, 0.5, 2.0),
-    mat('#c8a820', 1.0, 120)
-  );
-  pinStrip.position.set(7.1 + 51.0/2, compY + 8.5, 3.5 + 1.0);
-  compGroup.add(pinStrip);
+  // ── 40-pin GPIO header — RPi HAT standard: x=7.1mm, y=3.5mm on board ──
+  // Pitch: 2.54mm × 20 cols = 50.8mm span; 2 rows × 2.54mm = 5.08mm depth
+  const hdrPitch = geom.gpio_header_pitch_mm || 2.54;
+  const hdrCols  = geom.gpio_cols  || 20;
+  const hdrRows  = geom.gpio_rows  || 2;
+  const HDR_W  = hdrCols * hdrPitch;             // 50.8mm
+  const HDR_D  = hdrRows * hdrPitch;             // 5.08mm
+  const HDR_H  = geom.gpio_header_above_mm || 8.5;
+  // RPi HAT spec: header starts at board (7.1mm, 3.5mm) — GPIO pin 1 corner
+  const HDR_BX = 7.1;    // board-local X
+  const HDR_BZ = 3.5;    // board-local Z
+  const hdr = new THREE.Mesh(new THREE.BoxGeometry(HDR_W, HDR_H, HDR_D), mat('#0d0d14', 1.0, 20));
+  hdr.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H/2, OZ + HDR_BZ + HDR_D/2);
+  compGroup.add(hdr);
+  // Gold pin row tops (2 thin strips — one per row)
+  for (let row = 0; row < hdrRows; row++) {
+    const pstrip = new THREE.Mesh(new THREE.BoxGeometry(HDR_W - 2.0, 0.5, 1.2), mat('#c8a820', 1.0, 120));
+    pstrip.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H, OZ + HDR_BZ + hdrPitch*0.5 + row*hdrPitch);
+    compGroup.add(pstrip);
+  }
 
-  // 5-way joystick
-  const joy = geom.joystick_aperture;
-  const joySpec = geom.joystick_center_mm || (joy ? [joy.cx, joy.cy] : null);
-  if (joySpec) {
-    const [jx, jz] = joySpec;
-    // Square base
-    compGroup.add(Object.assign(
-      new THREE.Mesh(new THREE.BoxGeometry(12, 1.8, 12), mat('#222228', 1.0, 30)),
-      {position: new THREE.Vector3(jx, compY + 0.9, jz)}
-    ));
-    // Nub cylinder
-    const nub = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 5.5, 20), mat('#444450', 1.0, 50));
+  // ── 5-way joystick — exact center from spec joystick_center_mm ──
+  const joyRaw = geom.joystick_center_mm;
+  const joyD   = geom.joystick_diameter_mm || 12.0;
+  if (joyRaw && joyRaw.length >= 2) {
+    const jx = OX + joyRaw[0];
+    const jz = OZ + joyRaw[1];
+    // Square SMD switch body (12×12mm)
+    const jbase = new THREE.Mesh(new THREE.BoxGeometry(joyD, 1.8, joyD), mat('#1e1e24', 1.0, 30));
+    jbase.position.set(jx, compY + 0.9, jz);
+    compGroup.add(jbase);
+    // 4 direction contact pads around base
+    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dz])=>{
+      const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.5, 12), mat('#888898', 1.0, 60));
+      pad.position.set(jx + dx*(joyD*0.42), compY + 1.8 - 0.1, jz + dz*(joyD*0.42));
+      compGroup.add(pad);
+    });
+    // Cylindrical nub shaft
+    const nub = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 5.5, 24), mat('#3c3c46', 1.0, 50));
     nub.position.set(jx, compY + 1.8 + 2.75, jz);
     compGroup.add(nub);
-    // Cap
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 2.5, 1.2, 20), mat('#555560', 1.0, 60));
-    cap.position.set(jx, compY + 1.8 + 5.5 + 0.6, jz);
+    // Wider ergonomic cap (slight frustum)
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 2.4, 1.3, 24), mat('#4a4a56', 1.0, 60));
+    cap.position.set(jx, compY + 1.8 + 5.5 + 0.65, jz);
     compGroup.add(cap);
   }
 
-  // Tactile buttons (KEY1/2/3)
-  (geom.button_positions_mm || []).forEach(([bx, bz])=>{
-    // Housing
-    compGroup.add(Object.assign(
-      new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 6), mat('#111116', 1.0, 20)),
-      {position: new THREE.Vector3(bx, compY + 1.75, bz)}
-    ));
-    // White cap
-    const bcap = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 1.0, 16), mat('#e8e8e8', 1.0, 40));
-    bcap.position.set(bx, compY + 3.5 + 0.5, bz);
+  // ── Tactile buttons — exact positions from spec button_positions_mm ──
+  // Each entry is [board_x, board_z, label]
+  (geom.button_positions_mm || []).forEach(entry => {
+    const bx = OX + entry[0];
+    const bz = OZ + entry[1];
+    // 6×6mm SMD tact switch body, 3.5mm tall
+    const body = new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 6), mat('#0e0e14', 1.0, 20));
+    body.position.set(bx, compY + 1.75, bz);
+    compGroup.add(body);
+    // 4 copper legs at corners
+    [[-3,-3],[3,-3],[-3,3],[3,3]].forEach(([ldx,ldz])=>{
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.3, 0.8), mat('#b87333', 1.0, 80));
+      leg.position.set(bx+ldx, compY - 0.1, bz+ldz);
+      compGroup.add(leg);
+    });
+    // Steel stem
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 1.0, 16), mat('#888898', 1.0, 80));
+    stem.position.set(bx, compY + 3.5 + 0.5, bz);
+    compGroup.add(stem);
+    // White round cap
+    const bcap = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 0.9, 16), mat('#e8e8ea', 1.0, 50));
+    bcap.position.set(bx, compY + 3.5 + 1.0 + 0.45, bz);
     compGroup.add(bcap);
   });
 
-  // Controller IC (small black QFP near display)
-  const icX = (dc ? dc.x + dc.w + 2.0 : BW * 0.6);
-  const icZ = (dc ? dc.y + 2.0 : BH * 0.3);
-  compGroup.add(Object.assign(
-    new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.0, 5.5), mat('#0a0a10', 1.0, 60)),
-    {position: new THREE.Vector3(icX + 2.75, compY + 0.5, icZ + 2.75)}
-  ));
+  // ── Controller IC — QFP package, right of display, board-local position ──
+  // Waveshare 1.3"/2": IC is roughly at board (display_right + 2mm, display_top + 2mm)
+  const icBX = dc && dc.w > 0
+    ? (dc.x - OX) + dc.w + 2.0    // board-local: past right edge of display cutout
+    : BW * 0.65;
+  const icBZ = dc && dc.h > 0
+    ? (dc.y - OZ) + 2.0
+    : BH * 0.25;
+  const icBody = new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.0, 5.5), mat('#080810', 1.0, 60));
+  icBody.position.set(OX + icBX + 2.75, compY + 0.5, OZ + icBZ + 2.75);
+  compGroup.add(icBody);
+  // 4-sided lead frame (silver strips around IC perimeter)
+  [[icBX - 0.6, icBZ,       0.6, 5.5],
+   [icBX + 5.5, icBZ,       0.6, 5.5],
+   [icBX,       icBZ - 0.6, 5.5, 0.6],
+   [icBX,       icBZ + 5.5, 5.5, 0.6],
+  ].forEach(([lx, lz, lw, ld]) => {
+    const lead = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.4, ld), mat('#aaaaaf', 1.0, 100));
+    lead.position.set(OX + lx + lw/2, compY + 0.1, OZ + lz + ld/2);
+    compGroup.add(lead);
+  });
+  // Pin-1 silkscreen dot
+  const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.08, 10), mat('#e8e8e8', 1.0, 40));
+  dot.position.set(OX + icBX + 0.6, compY + 1.0, OZ + icBZ + 0.6);
+  compGroup.add(dot);
+
+  // ── 4× decoupling caps (0402 brown ceramics) right of IC ──
+  [[icBX + 7.0, icBZ      ],
+   [icBX + 7.0, icBZ + 1.5],
+   [icBX + 8.5, icBZ      ],
+   [icBX + 8.5, icBZ + 1.5],
+  ].forEach(([cx, cz]) => {
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.5), mat('#664422', 1.0, 30));
+    cap.position.set(OX + cx, compY + 0.25, OZ + cz);
+    compGroup.add(cap);
+  });
 
   scene.add(compGroup);
   shellObjects.components = compGroup;
