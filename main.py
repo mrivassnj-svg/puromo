@@ -617,3 +617,8 @@ def index():
     if ui_path.exists():
         return HTMLResponse(ui_path.read_text())
     return HTMLResponse("<h1>UI not found — place index.html in ui/</h1>")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8765, reload=True)
