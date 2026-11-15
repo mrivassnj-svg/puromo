@@ -107,25 +107,30 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 .device-item .dn{font-size:.82rem;font-weight:600}
 .device-item .dm{font-size:.72rem;color:var(--muted)}
 .svg-wrap{overflow:auto;background:#07090f;border-radius:8px;padding:12px;border:1px solid var(--border)}
+/* Hat-color deck selector */
+.hat-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;cursor:pointer;
+  margin-bottom:4px;border:1.5px solid transparent;transition:all .15s}
+.hat-item:hover{background:rgba(255,255,255,.04)}
+.hat-item.active{border-color:currentColor;background:rgba(255,255,255,.05)}
+.hat-dot{width:18px;height:18px;border-radius:50%;flex-shrink:0}
+.hat-name{font-size:.8rem;font-weight:600}
+.hat-sub{font-size:.7rem;color:var(--muted)}
 </style>
 </head>
 <body>
 
 <header>
-  <!-- Puromo logo: stylised P + circuit node -->
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
     <rect width="30" height="30" rx="6" fill="#4f8ef7" opacity=".15"/>
-    <!-- P shape -->
     <path d="M7 6 L7 24 M7 6 L16 6 Q21 6 21 11 Q21 16 16 16 L7 16" stroke="#4f8ef7" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    <!-- circuit nodes -->
     <circle cx="23" cy="20" r="2" fill="#7c5cd8"/>
     <circle cx="23" cy="25" r="1.4" fill="#22c55e"/>
     <line x1="23" y1="22" x2="23" y2="23.6" stroke="#7c5cd8" stroke-width="1.2"/>
   </svg>
   <div>
-    <h1 style="letter-spacing:.5px">Puromo <span style="font-size:.85rem;color:var(--muted);font-weight:400">プロモ</span></h1>
+    <h1 style="letter-spacing:.5px">Puromo <span style="font-size:.85rem;color:var(--muted);font-weight:400">プロモ — Cyberdeck Builder</span></h1>
   </div>
-  <span class="badge">Waveshare LCD HAT · Custom PCB · Blender STL · Firmware · PDF Report</span>
+  <span class="badge">9 Cyberdeck Archetypes · PCB Replicas · Blender STL · Firmware · Wiring · PDF</span>
 </header>
 
 <div class="layout">
@@ -133,87 +138,80 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 <!-- ═══ SIDEBAR ═══ -->
 <aside class="sidebar">
 
+  <!-- Hat color deck selector -->
   <div class="sb-section">
-    <h4>🔍 Device Search</h4>
-    <input id="q-input" type="text" value="1.3inch LCD HAT" placeholder="Model name, e.g. 1.3, 240x240, 2inch…"
-      oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doCrawl()"/>
-    <select id="q-vendor" style="margin-top:6px" onchange="onSearchInput(document.getElementById('q-input').value)">
-      <option value="waveshare">Waveshare</option>
-      <option value="adafruit">Adafruit</option>
-      <option value="sparkfun">SparkFun</option>
-      <option value="arduino">Arduino</option>
-      <option value="raspberrypi">Raspberry Pi</option>
-    </select>
-    <div class="btn-row"><button class="btn btn-primary" onclick="doCrawl()">Crawl / Lookup</button></div>
+    <h4>🎩 Cyberdeck Archetype</h4>
+    <div id="hat-deck-list"></div>
   </div>
 
+  <!-- Known HATs (PCB brain for selected deck) -->
   <div class="sb-section">
-    <h4>📦 Known HATs</h4>
+    <h4>🧠 Brain PCB</h4>
     <div id="known-list"></div>
+    <div style="margin-top:7px">
+      <input id="q-input" type="text" placeholder="Search other boards…"
+        oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doCrawl()"
+        style="font-size:.77rem"/>
+      <div class="btn-row" style="margin-top:5px">
+        <button class="btn btn-secondary" style="font-size:.74rem;padding:5px 10px" onclick="doCrawl()">Lookup</button>
+      </div>
+      <div id="search-suggestions" style="font-size:.72rem;color:var(--muted);margin-top:4px"></div>
+    </div>
   </div>
 
-  <div class="sb-section">
-    <h4>🔍 Search Suggestions</h4>
-    <div id="search-suggestions" style="font-size:.74rem;color:var(--muted)">Type above to see ranked matches.</div>
-  </div>
-
+  <!-- Build options -->
   <div class="sb-section">
     <h4>⚙️ Build Options</h4>
     <label>Model Name</label>
     <input id="model-name" type="text" value="handheld_v1"/>
-    <label>GPIO Header Variant</label>
+    <label>GPIO Header</label>
     <select id="header-variant"></select>
     <div id="header-info" class="hint" style="margin-top:4px"></div>
-    <label><input type="checkbox" id="inc-battery" style="width:auto;margin-right:5px"/>Include Battery Bay</label>
-    <label>Battery W×H×D (mm)</label>
-    <input id="bat-size" type="text" value="50,20,6"/>
+    <label><input type="checkbox" id="inc-battery" style="width:auto;margin-right:5px"/>Battery Bay</label>
+    <input id="bat-size" type="text" value="50,20,6" placeholder="W,H,D mm" style="margin-top:4px"/>
     <div class="btn-row">
       <button class="btn btn-secondary" id="btn-pipeline" onclick="doPipeline()">▶ Run Pipeline</button>
     </div>
   </div>
 
+  <!-- Custom PCB -->
   <div class="sb-section">
-    <h4>🔧 Custom PCB Entry</h4>
-    <div id="custom-pcb-toggle" style="font-size:.74rem;color:var(--accent);cursor:pointer;margin-bottom:8px" onclick="toggleCustomPCB()">▶ Enter custom board dimensions</div>
+    <h4>🔧 Custom PCB</h4>
+    <div id="custom-pcb-toggle" style="font-size:.74rem;color:var(--accent);cursor:pointer;margin-bottom:8px" onclick="toggleCustomPCB()">▶ Enter dimensions</div>
     <div id="custom-pcb-form" style="display:none">
-      <label>Board Width (mm)</label>
-      <input id="cpb-width" type="number" value="65" step="0.1"/>
-      <label>Board Height (mm)</label>
-      <input id="cpb-height" type="number" value="30" step="0.1"/>
-      <label>Display Diagonal (inch)</label>
-      <input id="cpb-diag" type="number" value="1.3" step="0.1"/>
-      <label>Resolution (W × H)</label>
+      <label>Width (mm)</label><input id="cpb-width" type="number" value="65" step="0.1"/>
+      <label>Height (mm)</label><input id="cpb-height" type="number" value="30" step="0.1"/>
+      <label>Display (inch)</label><input id="cpb-diag" type="number" value="1.3" step="0.1"/>
+      <label>Resolution W×H</label>
       <div style="display:flex;gap:5px">
         <input id="cpb-resw" type="number" value="240" style="flex:1"/>
         <input id="cpb-resh" type="number" value="240" style="flex:1"/>
       </div>
       <label>Interface</label>
       <select id="cpb-iface">
-        <option value="SPI">SPI</option>
-        <option value="I2C">I2C</option>
-        <option value="Parallel">Parallel</option>
-        <option value="HDMI">HDMI</option>
+        <option value="SPI">SPI</option><option value="I2C">I2C</option>
+        <option value="Parallel">Parallel</option><option value="HDMI">HDMI</option>
       </select>
       <label>Controller IC</label>
-      <input id="cpb-ic" type="text" value="ST7789" placeholder="e.g. ST7789, SSD1306"/>
-      <label>Vendor</label>
-      <input id="cpb-vendor" type="text" value="custom" placeholder="e.g. waveshare"/>
+      <input id="cpb-ic" type="text" value="ST7789"/>
       <div class="btn-row">
-        <button class="btn btn-green" style="width:100%" onclick="applyCustomPCB()">✓ Apply Custom Spec</button>
+        <button class="btn btn-green" style="width:100%" onclick="applyCustomPCB()">✓ Apply</button>
       </div>
     </div>
   </div>
 
+  <!-- Shell colours -->
   <div class="sb-section">
-    <h4>🎨 Shell Colours</h4>
+    <h4>🎨 Shell Colour</h4>
     <div id="colour-parts"></div>
   </div>
 
+  <!-- 3D controls -->
   <div class="sb-section">
     <h4>🧊 3D Controls</h4>
-    <div class="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+    <div class="hint">Drag · Scroll · Right-drag pan</div>
     <div class="btn-row" style="margin-top:8px">
-      <button class="btn btn-secondary" onclick="resetCamera()">↺ Reset View</button>
+      <button class="btn btn-secondary" onclick="resetCamera()">↺ Reset</button>
       <button class="btn btn-secondary" onclick="toggleExplode()">⬆ Explode</button>
     </div>
     <label>Render Mode</label>
@@ -223,7 +221,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
       <option value="xray">X-Ray</option>
     </select>
     <div class="btn-row">
-      <button class="btn btn-purple" onclick="generate3D()">🧊 Export STL (Blender)</button>
+      <button class="btn btn-purple" onclick="generate3D()">🧊 Export STL</button>
     </div>
   </div>
 
@@ -232,7 +230,8 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 <!-- ═══ MAIN ═══ -->
 <main class="main">
 <div class="tabs">
-  <div class="tab active"   onclick="showTab('t-3d',this)">3D View</div>
+  <div class="tab active"   onclick="showTab('t-deck',this)">🎩 Deck</div>
+  <div class="tab"          onclick="showTab('t-3d',this)">3D View</div>
   <div class="tab"          onclick="showTab('t-spec',this)">Device Spec</div>
   <div class="tab"          onclick="showTab('t-geom',this)">Geometry</div>
   <div class="tab"          onclick="showTab('t-pinout',this)">Pinout</div>
@@ -242,6 +241,55 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
   <div class="tab"          onclick="showTab('t-report',this)">📄 Report</div>
   <div class="tab"          onclick="showTab('t-print',this)">🖨 Print</div>
   <div class="tab"          onclick="showTab('t-files',this)">Files</div>
+</div>
+
+<!-- ── DECK VIEW ── -->
+<div id="t-deck" class="tab-pane" style="display:flex;flex-direction:column;gap:14px;padding:14px">
+  <div id="deck-hero" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:18px 22px;display:flex;align-items:flex-start;gap:18px">
+    <div id="deck-hat-badge" style="width:54px;height:54px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;font-weight:900">?</div>
+    <div style="flex:1">
+      <div id="deck-title" style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Select a cyberdeck archetype →</div>
+      <div id="deck-goal" style="font-size:.82rem;color:var(--muted);line-height:1.6"></div>
+    </div>
+    <div id="deck-safety-badge" style="font-size:.72rem;color:var(--yellow);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:5px;padding:4px 9px;white-space:nowrap;flex-shrink:0"></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <!-- BOM -->
+    <div class="card">
+      <h3>Bill of Materials</h3>
+      <table class="dt" id="deck-bom-table">
+        <thead><tr><th>Qty</th><th>Part</th><th>Notes</th></tr></thead>
+        <tbody><tr><td colspan="3" style="color:var(--muted)">Select a deck.</td></tr></tbody>
+      </table>
+    </div>
+    <!-- Enclosure sketch -->
+    <div class="card">
+      <h3>Enclosure Sketch</h3>
+      <pre id="deck-enclosure" style="font-family:monospace;font-size:.78rem;color:var(--accent);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;overflow-x:auto;white-space:pre;margin:0">Select a deck.</pre>
+      <div id="deck-notes" style="font-size:.76rem;color:var(--muted);margin-top:8px;line-height:1.6"></div>
+    </div>
+  </div>
+
+  <!-- Wiring table -->
+  <div class="card">
+    <h3>Wiring Table</h3>
+    <table class="dt" id="deck-wiring-table">
+      <thead><tr><th>Module</th><th>Module Pin</th><th>Brain Pin / GPIO</th><th>Notes</th></tr></thead>
+      <tbody><tr><td colspan="4" style="color:var(--muted)">Select a deck.</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Safety checklist -->
+  <div class="card">
+    <h3>⚠ Safety &amp; Legal</h3>
+    <div id="deck-safety" style="font-size:.8rem;line-height:1.8;color:var(--muted)">
+      Use only on gear you own, on isolated lab networks, or with written authorization.<br>
+      All logic is 3.3 V — never feed 5 V into GPIO pins.<br>
+      Never connect a LiPo directly to the Pi's 5 V pin; use a boost/charge board.<br>
+      Check radio-transmission regulations before enabling any transmit-capable module.
+    </div>
+  </div>
 </div>
 
 <!-- ── 3D VIEW ── -->
@@ -1308,9 +1356,310 @@ function showTab(id,el) {
 // ═══════════════════════════════════════════════════════
 //  Init
 // ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+//  Cyberdeck archetype data (9 hat-color builds)
+// ═══════════════════════════════════════════════════════
+const CYBERDECK_BUILDS = [
+  {
+    id:'white', label:'White Hat', emoji:'⬜', color:'#e8e8ea', textColor:'#1a1a2a',
+    sub:'General pentest deck',
+    goal:'Pocket Kali machine — Wi-Fi audits of your own networks, UART/JTAG on IoT, network recon.',
+    safety:'Own networks / written auth only',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'Raspberry Pi Zero 2 W (with headers)', notes:'Brain'},
+      {qty:1, part:'3.5" SPI TFT — Waveshare 3.5" or Adafruit PiTFT class', notes:'Display'},
+      {qty:1, part:'BBQ10 keyboard (Solder Party, I2C)', notes:'Input'},
+      {qty:1, part:'USB Wi-Fi (MT7612U or RTL8812AU) + OTG hub', notes:'Monitor mode'},
+      {qty:1, part:'USB-UART adapter (CP2102 or FT232)', notes:'Serial debug'},
+      {qty:1, part:'GPS module NEO-6M', notes:'Geolocation'},
+      {qty:1, part:'Pocket logic analyzer (Saleae-compat 8-ch)', notes:'Protocol analysis'},
+      {qty:1, part:'SWD/JTAG probe (RPi Debug Probe)', notes:'Firmware access'},
+      {qty:1, part:'microSD 64 GB (Kali ARM image)', notes:'OS'},
+      {qty:1, part:'LiPo 3.7V 2000–5000 mAh + PowerBoost 1000C', notes:'Power'},
+    ],
+    wiring:[
+      {module:'BBQ10',pin:'VCC / GND',brain:'Pin 1 (3.3V) / Pin 9 (GND)',notes:''},
+      {module:'BBQ10',pin:'SDA / SCL',brain:'Pin 3 (GPIO2) / Pin 5 (GPIO3)',notes:'I2C'},
+      {module:'BBQ10',pin:'INT',brain:'Pin 7 (GPIO4)',notes:'Interrupt'},
+      {module:'NEO-6M',pin:'VCC / GND',brain:'Pin 17 (3.3V) / Pin 14 (GND)',notes:''},
+      {module:'NEO-6M',pin:'TX → Pi RX',brain:'Pin 10 (GPIO15)',notes:'Disable serial console first'},
+      {module:'NEO-6M',pin:'RX ← Pi TX',brain:'Pin 8 (GPIO14)',notes:''},
+      {module:'3.5" TFT HAT',pin:'40-pin header',brain:'SPI0 (full header)',notes:'Use stacking header for I2C access'},
+      {module:'USB Wi-Fi / JTAG',pin:'USB',brain:'OTG hub',notes:''},
+    ],
+    enclosure:`+--------------------------------+\n|  [ 3.5" TFT ]                  |\n|                                |\n|  [  BBQ10 keyboard  ]          |\n+--------------------------------+\n side: USB hub, USB-C charge, power switch\n top:  antenna cutout (GPS patch under lid)\n rear: debug probe / UART header access door`,
+    notes:'Disable the serial login console so GPS can use UART. Most TFT HATs cover the header — use a stacking header or flat-cable breakout for I2C/UART pins.',
+  },
+  {
+    id:'red', label:'Red Team', emoji:'🟥', color:'#ef4444', textColor:'#fff',
+    sub:'Offensive emulation deck',
+    goal:'Physical security & access-control testing: badge cloning, sub-GHz replay, authorized HID tests.',
+    safety:'Authorized engagements ONLY — written scope required',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'M5Stack Cardputer or LilyGO T-Deck (ESP32-S3 + keyboard)', notes:'Brain'},
+      {qty:1, part:'CC1101 sub-GHz module (433/868/915 MHz)', notes:'Match regional legal band'},
+      {qty:1, part:'PN532 NFC/RFID module (I2C mode)', notes:'Badge cloning'},
+      {qty:1, part:'nRF24L01+ with PA/LNA', notes:'Optional 2.4 GHz'},
+      {qty:1, part:'IR LED + IR receiver (TSOP38238)', notes:'IR replay'},
+      {qty:1, part:'Raspberry Pi Pico W', notes:'USB HID tests only'},
+      {qty:1, part:'HackRF One + PortaPack Mayhem (optional)', notes:'SDR, separate unit'},
+      {qty:1, part:'LiPo 3.7V 2000 mAh + charge board', notes:'Power'},
+    ],
+    wiring:[
+      {module:'CC1101',pin:'SCK / MISO / MOSI',brain:'ESP32 GPIO 12 / 13 / 11',notes:'SPI'},
+      {module:'CC1101',pin:'CSN / GDO0',brain:'ESP32 GPIO 10 / 4',notes:'3.3V only'},
+      {module:'PN532',pin:'SDA / SCL',brain:'ESP32 GPIO 8 / 9',notes:'I2C mode switch set'},
+      {module:'PN532',pin:'VCC / GND',brain:'3V3 / GND',notes:''},
+      {module:'IR TX',pin:'via NPN transistor',brain:'ESP32 GPIO 14',notes:''},
+      {module:'IR RX',pin:'OUT',brain:'ESP32 GPIO 15',notes:''},
+      {module:'nRF24L01+',pin:'SPI (shared bus)',brain:'CSN GPIO 5, CE GPIO 6',notes:'10µF cap across power pins'},
+      {module:'Pico W',pin:'USB',brain:'Separate USB device',notes:'Flash as HID only'},
+    ],
+    enclosure:`+----------------------------------+\n| [ screen ]        [ ant ant ]    |\n| [ keyboard ]      NFC pad (rear) |\n+----------------------------------+\n front lip: IR window\n rear:  PN532 flush behind ≤2mm wall\n top:   SMA pigtails to sub-GHz antenna\n bay:   Pico W slot with USB-C pass-through`,
+    notes:'10µF cap across nRF24L01+ power pins. Check local radio-transmission regulations before using any transmit-capable module.',
+  },
+  {
+    id:'blue', label:'Blue Team', emoji:'🟦', color:'#3b82f6', textColor:'#fff',
+    sub:'Defender / monitoring deck',
+    goal:'Passive network capture, rogue-AP detection, RF/BLE baselining.',
+    safety:'Passive capture only — do not capture others\' credentials',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'Raspberry Pi 5 (4–8 GB) with active cooler', notes:'Brain'},
+      {qty:1, part:'Passive LAN tap (Throwing Star or equiv)', notes:'Capture'},
+      {qty:1, part:'Dual-port USB 3 Gigabit Ethernet adapter', notes:'Tap interfaces'},
+      {qty:1, part:'E-ink display Waveshare 2.13" or 2.9" HAT', notes:'Status/alerts'},
+      {qty:1, part:'ESP32 dev board (rogue AP / deauth / BLE scan)', notes:'Detector node'},
+      {qty:1, part:'RTL-SDR v4 + small antenna', notes:'RF baseline'},
+      {qty:1, part:'Small powered USB hub', notes:''},
+      {qty:1, part:'NVMe SSD hat (high-endurance)', notes:'pcap/log storage'},
+      {qty:1, part:'5V 5A USB-C PD power bank', notes:'Pi 5 needs real power'},
+    ],
+    wiring:[
+      {module:'LAN tap',pin:'Capture ports',brain:'USB Ethernet adapters (RX only)',notes:'Never transmit on monitor side'},
+      {module:'E-ink HAT',pin:'40-pin header',brain:'SPI0 (BUSY/RST/DC per silk)',notes:''},
+      {module:'ESP32 detector',pin:'TX',brain:'Pi RX — Pin 10 (GPIO15)',notes:''},
+      {module:'ESP32 detector',pin:'RX',brain:'Pi TX — Pin 8 (GPIO14)',notes:'Common GND required'},
+      {module:'RTL-SDR',pin:'USB',brain:'Through hub',notes:''},
+    ],
+    enclosure:`+-------------------------------------+\n|  [ e-ink 2.9" ]    status LEDs      |\n|                                     |\n|  Pi 5 + cooler (vent grille on top) |\n+-------------------------------------+\n side A: LAN IN / LAN OUT (through tap)\n side B: USB-C PD in, USB hub\n top:    SDR antenna on SMA bulkhead`,
+    notes:'Suricata or Zeek on tap interfaces. Lightweight dashboard on e-ink. ESP32 firmware counts beacon frames and flags unknown SSIDs.',
+  },
+  {
+    id:'purple', label:'Purple Team', emoji:'🟣', color:'#a855f7', textColor:'#fff',
+    sub:'Bridge deck — attack + detect',
+    goal:'Run an emulated attack and watch the detection response in real time — training and demos.',
+    safety:'Isolated lab only',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'Raspberry Pi 5 (blue-side analytics)', notes:'Brain'},
+      {qty:1, part:'ESP32-S3 dev board (red-side radio coprocessor)', notes:''},
+      {qty:1, part:'3.5" SPI TFT (red/attack side display)', notes:''},
+      {qty:1, part:'E-ink 2.9" (blue/detection side display)', notes:''},
+      {qty:1, part:'BBQ10 keyboard or compact USB keyboard', notes:'Input'},
+      {qty:1, part:'CC1101 module on ESP32', notes:'Sub-GHz (see red build)'},
+      {qty:1, part:'Mini USB hub + PD power bank', notes:'Power'},
+    ],
+    wiring:[
+      {module:'ESP32 (red side)',pin:'TX GPIO43',brain:'Pi RX — Pin 10',notes:'UART bridge'},
+      {module:'ESP32 (red side)',pin:'RX GPIO44',brain:'Pi TX — Pin 8',notes:''},
+      {module:'ESP32 (red side)',pin:'GND',brain:'Pi GND — Pin 6',notes:'Common ground'},
+      {module:'CC1101',pin:'See red-team table',brain:'ESP32',notes:''},
+      {module:'TFT (attack)',pin:'SPI0 CE0',brain:'Pi header',notes:'DC/RST separate pins'},
+      {module:'E-ink (defend)',pin:'SPI0 CE1',brain:'Pi header',notes:'DC/RST separate pins'},
+    ],
+    enclosure:`+-------------------------------------------+\n| [ RED: TFT ]            [ BLUE: e-ink ]   |\n|  attack log              detections       |\n|                                           |\n|            [ keyboard strip ]             |\n+-------------------------------------------+\n red LED bar left, blue LED bar right\n rear: Pi 5 vent, USB-C PD in`,
+    notes:'Enable Pi hardware UART, disable serial console. Use newline-delimited JSON over UART: ESP32 reports events, Pi logs and shows matching detections.',
+  },
+  {
+    id:'gray', label:'Gray Hat', emoji:'🩶', color:'#6b7280', textColor:'#fff',
+    sub:'Recon & survey deck (passive)',
+    goal:'Map Wi-Fi/BLE/LoRa coverage of your own area — log, don\'t interact.',
+    safety:'Passive only — respect privacy laws on device identifiers',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'LilyGO T-Beam (ESP32 + GPS + SX1262 LoRa + 18650)', notes:'Easiest path — pre-wired'},
+      {qty:1, part:'18650 cell (protected)', notes:'Power'},
+      {qty:1, part:'1.3" OLED (SSD1306/SH1106, I2C)', notes:'Display'},
+      {qty:1, part:'microSD module', notes:'Logging'},
+      {qty:1, part:'LoRa antenna (match your band)', notes:''},
+    ],
+    wiring:[
+      {module:'GPS NEO-M8N',pin:'TX',brain:'ESP32 GPIO18',notes:''},
+      {module:'GPS NEO-M8N',pin:'RX',brain:'ESP32 GPIO17',notes:''},
+      {module:'GPS NEO-M8N',pin:'VCC / GND',brain:'3V3 / GND',notes:''},
+      {module:'SX1262 LoRa',pin:'SCK/MISO/MOSI/NSS',brain:'GPIO 12/13/11/10',notes:'SPI'},
+      {module:'SX1262 LoRa',pin:'DIO1/BUSY/RESET',brain:'GPIO 4/5/6',notes:''},
+      {module:'OLED I2C',pin:'SDA / SCL',brain:'GPIO 8 / 9',notes:''},
+      {module:'microSD',pin:'SPI (second CS)',brain:'GPIO 7',notes:''},
+    ],
+    enclosure:`  [ OLED ]\n  [ 2 buttons ]\n  +---------+\n  | T-Beam  |  antennas up top (LoRa + GPS patch under lid)\n  | 18650   |  microSD slot flush on side\n  +---------+`,
+    notes:'The T-Beam has all this pre-wired — easiest build. Wi-Fi/BLE scanning in passive mode only.',
+  },
+  {
+    id:'black', label:'Black Hat Lab', emoji:'⬛', color:'#111118', textColor:'#aaa',
+    sub:'Threat-actor simulation (isolated lab)',
+    goal:'Practice adversary TTPs from MITRE ATT&CK against targets you built yourself — no internet route.',
+    safety:'ISOLATED LAB ONLY — no connection to any external network',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'Raspberry Pi 5 8GB with NVMe hat', notes:'Brain'},
+      {qty:1, part:'Compact travel router (GL.iNet) — WAN unplugged', notes:'Isolated lab LAN'},
+      {qty:1, part:'USB Wi-Fi (monitor mode) for own lab APs', notes:''},
+      {qty:1, part:'Pico W as USB HID test device', notes:''},
+      {qty:1, part:'3.5" HDMI/DSI touchscreen + compact keyboard', notes:''},
+      {qty:'2–3', part:'Spare Pi Zero 2 W (disposable victims)', notes:''},
+      {qty:1, part:'Container lab: DVWA, Metasploitable, vulnerable VMs', notes:''},
+    ],
+    wiring:[
+      {module:'Pi 5 ↔ lab router',pin:'Ethernet',brain:'Router LAN port',notes:'WAN port physically unplugged'},
+      {module:'Victim Pi Zeros',pin:'Wi-Fi',brain:'Router AP (isolated)',notes:''},
+      {module:'Pico W',pin:'USB',brain:'Pi or victim machine',notes:''},
+      {module:'Touchscreen',pin:'HDMI/DSI + USB touch',brain:'Pi',notes:''},
+    ],
+    enclosure:`+-------------------------------------+\n| [ 3.5–5" display ]                  |\n| [ keyboard ]                        |\n+-------------------------------------+\n rear: router velcroed in sub-bay, WAN port physically blocked\n side: "LAB ONLY" label + kill switch on router power`,
+    notes:'Keep a written scope/authorization for every test. The router\'s WAN port must remain physically disconnected at all times.',
+  },
+  {
+    id:'green', label:'Green Team', emoji:'🟩', color:'#22c55e', textColor:'#fff',
+    sub:'DevSecOps dashboard deck',
+    goal:'Live CI results, vulnerability-scanner findings, dependency alerts — LEDs go green/amber/red.',
+    safety:'Internal dev networks only',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'Raspberry Pi 4 or 5', notes:'Brain'},
+      {qty:1, part:'5" HDMI touchscreen', notes:'Dashboard display'},
+      {qty:1, part:'Compact USB keyboard', notes:'Input'},
+      {qty:1, part:'WS2812 LED strip (8 LEDs) + 74AHCT125 level shifter', notes:'Status bar'},
+      {qty:1, part:'LiPo or 5V PD power bank', notes:'Power'},
+    ],
+    wiring:[
+      {module:'WS2812 LED strip',pin:'Data',brain:'GPIO18 (via 74AHCT125)',notes:'Level shift 3.3V → 5V required'},
+      {module:'WS2812 LED strip',pin:'VCC',brain:'5V from boost board',notes:''},
+      {module:'WS2812 LED strip',pin:'GND',brain:'Common GND',notes:''},
+      {module:'5" HDMI display',pin:'HDMI + USB touch',brain:'Pi HDMI0 / USB',notes:''},
+    ],
+    enclosure:`Slim slab case — LED bar along the top edge\n+----------------------------------+\n| [ 5" HDMI touchscreen ]          |\n| [ keyboard ]  [ LED bar ▓▓▓▓▓▓ ] |\n+----------------------------------+`,
+    notes:'LEDs show green/amber/red based on CI pipeline status and CVE counts. Use rpi_ws281x library.',
+  },
+  {
+    id:'yellow', label:'Yellow Team', emoji:'🟨', color:'#f59e0b', textColor:'#1a1a0a',
+    sub:'Builder / firmware analysis deck',
+    goal:'Read and analyze firmware from devices you own; test your own code with fuzzing harnesses.',
+    safety:'Devices you own only',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'ESP32-S3 Cardputer or T-Deck', notes:'Brain'},
+      {qty:1, part:'SPI flash clip (SOIC8 test clip)', notes:'Firmware extraction'},
+      {qty:1, part:'CH341A programmer', notes:'Flash programmer'},
+      {qty:1, part:'USB-UART adapter', notes:'Serial console'},
+      {qty:1, part:'I2C/SPI bus sniffer', notes:'Protocol analysis'},
+      {qty:1, part:'Small breadboard rail', notes:'Prototyping'},
+    ],
+    wiring:[
+      {module:'SOIC8 clip',pin:'SPI pins',brain:'CH341A over USB',notes:'Match voltage of target chip'},
+      {module:'UART adapter',pin:'TX / RX / GND',brain:'Target TX/RX/GND',notes:'Same voltage level as target'},
+      {module:'CH341A',pin:'USB',brain:'Cardputer USB',notes:''},
+    ],
+    enclosure:`Flip-lid case with storage tray for clips and probes\n+----------------------------------+\n| [ screen ]  [ keyboard ]         |\n+==================================+\n| tray: SOIC clip, UART adapter,   |\n|       breadboard strip           |\n+----------------------------------+`,
+    notes:'Confirm target chip voltage before clipping. UART adapter and target must be at the same logic level.',
+  },
+  {
+    id:'orange', label:'Orange Team', emoji:'🟧', color:'#f97316', textColor:'#fff',
+    sub:'Awareness demo deck',
+    goal:'Safe live demos for training — fake captive portal on closed network showing phishing risk. No real credential capture.',
+    safety:'Isolated AP only — never capture real credentials',
+    brain:'1.3inch_lcd_hat',
+    bom:[
+      {qty:1, part:'ESP32-S3 Cardputer or Pi Zero 2 W', notes:'Brain'},
+      {qty:1, part:'Small TFT display', notes:''},
+      {qty:1, part:'Buttons + buzzer', notes:'User feedback'},
+      {qty:1, part:'Captive-portal demo AP (isolated)', notes:'No internet route'},
+      {qty:1, part:'Bright-colored case + stand', notes:'Visibility for demos'},
+    ],
+    wiring:[
+      {module:'TFT display',pin:'SPI',brain:'ESP32 SPI0',notes:''},
+      {module:'Buttons',pin:'GPIO input',brain:'ESP32 GPIOs',notes:'Pull-up resistors'},
+      {module:'Buzzer',pin:'GPIO output',brain:'ESP32 GPIO',notes:''},
+    ],
+    enclosure:`Bright case with a stand (high visibility for training audiences)\n+---------------------------+\n| [ TFT screen ]            |\n| [ BTN ]  [ BTN ]  [BUZZ]  |\n+---------------------------+\n USB-C charge on side`,
+    notes:'The captive portal AP must have no route to the internet. This is a demo tool only — never capture real user credentials.',
+  },
+];
+
+let activeDeckId = null;
+
+function renderHatDecks() {
+  const el = document.getElementById('hat-deck-list');
+  el.innerHTML = '';
+  CYBERDECK_BUILDS.forEach(deck => {
+    const item = document.createElement('div');
+    item.className = 'hat-item';
+    item.id = `hat-item-${deck.id}`;
+    item.style.color = deck.color;
+    item.innerHTML = `
+      <div class="hat-dot" style="background:${deck.color};border:1.5px solid rgba(255,255,255,.18)"></div>
+      <div>
+        <div class="hat-name" style="color:${deck.color}">${deck.label}</div>
+        <div class="hat-sub">${deck.sub}</div>
+      </div>`;
+    item.onclick = () => selectDeck(deck.id);
+    el.appendChild(item);
+  });
+}
+
+function selectDeck(id) {
+  activeDeckId = id;
+  const deck = CYBERDECK_BUILDS.find(d => d.id === id);
+  if (!deck) return;
+
+  // Highlight sidebar item
+  document.querySelectorAll('.hat-item').forEach(el => el.classList.remove('active'));
+  const item = document.getElementById(`hat-item-${id}`);
+  if (item) item.classList.add('active');
+
+  // Hero banner
+  document.getElementById('deck-hat-badge').textContent = deck.emoji;
+  document.getElementById('deck-hat-badge').style.background = deck.color + '33';
+  document.getElementById('deck-hat-badge').style.color = deck.color;
+  document.getElementById('deck-title').textContent = `${deck.emoji} ${deck.label} — ${deck.sub}`;
+  document.getElementById('deck-goal').textContent = deck.goal;
+  document.getElementById('deck-safety-badge').textContent = '⚠ ' + deck.safety;
+
+  // BOM table
+  document.querySelector('#deck-bom-table tbody').innerHTML =
+    deck.bom.map(r => `<tr>
+      <td style="font-family:monospace;color:var(--accent)">${r.qty}</td>
+      <td><b>${r.part}</b></td>
+      <td style="color:var(--muted)">${r.notes}</td>
+    </tr>`).join('');
+
+  // Wiring table
+  document.querySelector('#deck-wiring-table tbody').innerHTML =
+    deck.wiring.map(r => `<tr>
+      <td style="font-weight:600;color:var(--text)">${r.module}</td>
+      <td style="font-family:monospace;font-size:.78rem;color:var(--green)">${r.pin}</td>
+      <td style="font-family:monospace;font-size:.78rem;color:var(--accent)">${r.brain}</td>
+      <td style="font-size:.74rem;color:var(--muted)">${r.notes}</td>
+    </tr>`).join('');
+
+  // Enclosure sketch
+  document.getElementById('deck-enclosure').textContent = deck.enclosure;
+  document.getElementById('deck-notes').textContent = deck.notes;
+
+  // Switch to Deck tab
+  showTab('t-deck', document.querySelector('.tab[onclick*="t-deck"]'));
+
+  // Auto-load the deck's brain PCB into the 3D viewer
+  if (deck.brain) doCrawl(deck.brain);
+}
+
 document.addEventListener('DOMContentLoaded', async ()=>{
   initThree();
   buildColourUI();
+  renderHatDecks();
   await Promise.all([loadKnownDevices(), loadHeaderVariants()]);
   refreshFiles();
   // Pre-load GPIO reference for client-side lookup
