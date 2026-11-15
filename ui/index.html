@@ -6,6 +6,7 @@
 <title>Puromo プロモ — Handheld 3D Shell Builder</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -769,16 +770,18 @@ function buildShell3D(geom) {
   scene.add(lidGroup);
   shellObjects.lid = lidGroup;
 
-  // ── PCB (green board) ──
+  // ── PCB (green board placeholder — replaced by STL mesh when available) ──
   const pcbGeo = new THREE.BoxGeometry(
     geom.board_width_mm||65, 1.6, geom.board_height_mm||30
   );
-  const pcb = new THREE.Mesh(pcbGeo, mat('#1a4a1a', 0.9));
+  const pcbMat = new THREE.MeshPhongMaterial({color: new THREE.Color('#1a4a1a'), opacity: 0.9, transparent: true});
+  const pcb = new THREE.Mesh(pcbGeo, pcbMat);
   pcb.position.set(
     (geom.pcb_offset_x||3) + (geom.board_width_mm||65)/2,
     geom.pcb_z_from_floor||5.5,
     (geom.pcb_offset_y||3) + (geom.board_height_mm||30)/2
   );
+  pcb.name = 'pcb_placeholder';
   scene.add(pcb);
   shellObjects.pcb = pcb;
 
@@ -1402,9 +1405,66 @@ async function generate3D() {
       body:JSON.stringify({spec:currentSpec,model_name:document.getElementById('model-name').value})});
     const d=await r.json();
     document.getElementById('log').textContent=JSON.stringify(d,null,2);
-    statusOk('Blender job queued');
+    statusOk('Blender job queued — polling for PCB STL…');
     setTimeout(refreshFiles,5000);
+    // Find the pcb_stl filename from expected_files and start polling
+    const pcbFile = (d.expected_files||[]).find(f=>f.endsWith('_pcb.stl'));
+    if(pcbFile) pollAndLoadPcbStl(pcbFile, 0);
   } catch(e){ statusErr('3D gen error: '+e.message); }
+}
+
+// Poll /api/outputs until pcbFile appears, then load it into the Three.js scene
+async function pollAndLoadPcbStl(pcbFile, attempt) {
+  if(attempt > 60) { console.warn('[PCB STL] timed out waiting for', pcbFile); return; }
+  try {
+    const r = await fetch(API+'/api/outputs');
+    const d = await r.json();
+    const found = (d.files||[]).find(f=>f.name===pcbFile);
+    if(found) {
+      loadPcbStl(API+'/api/download/'+pcbFile);
+    } else {
+      setTimeout(()=>pollAndLoadPcbStl(pcbFile, attempt+1), 5000);
+    }
+  } catch(e) { console.warn('[PCB STL] poll error:', e); }
+}
+
+// Load a PCB STL file and replace the placeholder box mesh in the Three.js scene
+function loadPcbStl(url) {
+  if(!window.THREE || !THREE.STLLoader) {
+    console.warn('[PCB STL] STLLoader not available, skipping.');
+    return;
+  }
+  statusBusy('Loading PCB STL mesh…');
+  const loader = new THREE.STLLoader();
+  loader.load(url, function(geometry) {
+    // STL from Blender is in mm, Three.js world is also mm-scale here — scale 1:1
+    geometry.computeVertexNormals();
+    const material = new THREE.MeshPhongMaterial({
+      color: new THREE.Color('#1b4a1b'),
+      specular: new THREE.Color('#224422'),
+      shininess: 40,
+      side: THREE.DoubleSide,
+    });
+    const pcbMesh = new THREE.Mesh(geometry, material);
+    // The Blender export is in mm at scale 1:1 — no additional scale needed
+    // Blender Z-up → Three.js Y-up: rotate -90° around X
+    pcbMesh.rotation.x = -Math.PI / 2;
+    pcbMesh.name = 'pcb_stl_mesh';
+
+    // Remove old placeholder
+    if(shellObjects.pcb) {
+      scene.remove(shellObjects.pcb);
+      if(shellObjects.pcb.geometry) shellObjects.pcb.geometry.dispose();
+      if(shellObjects.pcb.material) shellObjects.pcb.material.dispose();
+    }
+    scene.add(pcbMesh);
+    shellObjects.pcb = pcbMesh;
+    statusOk('PCB STL mesh loaded (' + Math.round(geometry.attributes.position.count/3) + ' triangles)');
+    renderer.render(scene, camera);
+  }, undefined, function(err) {
+    console.warn('[PCB STL] load error:', err);
+    statusOk('Blender job done (STL load failed — check CORS/server)');
+  });
 }
 
 // ═══════════════════════════════════════════════════════

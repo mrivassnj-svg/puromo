@@ -263,6 +263,7 @@ async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
         "expected_files": [
             f"{model_slug}_bottom.stl",
             f"{model_slug}_lid.stl",
+            f"{model_slug}_pcb.stl",
             f"{model_slug}_shell.blend",
         ],
         "log_file": f"{model_slug}_blender.log",
