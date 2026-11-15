@@ -225,6 +225,20 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     </div>
   </div>
 
+  <!-- Groq AI key -->
+  <div class="sb-section">
+    <h4>🤖 Groq AI Key</h4>
+    <div class="hint" style="margin-bottom:6px">Powers render briefs &amp; assembly narration.</div>
+    <input id="groq-key-input" type="password" placeholder="gsk_…"
+      style="font-family:monospace;font-size:.75rem;letter-spacing:.05em"
+      oninput="setGroqKey(this.value)"/>
+    <div id="groq-key-status" class="hint" style="margin-top:4px"></div>
+    <div class="btn-row" style="margin-top:6px">
+      <button class="btn btn-secondary" style="font-size:.72rem;padding:4px 9px"
+        onclick="testGroqKey()">Test connection</button>
+    </div>
+  </div>
+
 </aside>
 
 <!-- ═══ MAIN ═══ -->
@@ -252,6 +266,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <div style="flex:1;min-width:0">
       <div id="deck-title" style="font-size:.95rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">← Select an archetype</div>
       <div id="deck-goal" style="font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="deck-render-brief" style="font-size:.72rem;color:var(--accent2);font-style:italic;margin-top:2px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical"></div>
     </div>
     <div id="deck-safety-badge" style="font-size:.7rem;color:var(--yellow);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:4px;padding:3px 8px;white-space:nowrap;flex-shrink:0"></div>
     <button class="btn btn-purple" style="font-size:.74rem;padding:5px 11px;flex-shrink:0" onclick="showTab('t-3d',document.querySelector('.tab[onclick*=\'t-3d\']'));ensureRenderer();onResize()">3D View →</button>
@@ -639,6 +654,72 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 // ═══════════════════════════════════════════════════════
 const API = '';
 let currentSpec=null, currentGeom=null, currentBuild=null, currentSpecs=null, currentPinout=null;
+
+// ═══════════════════════════════════════════════════════
+//  Groq AI integration
+// ═══════════════════════════════════════════════════════
+function setGroqKey(val) {
+  if (val.trim()) {
+    sessionStorage.setItem('groq_api_key', val.trim());
+    window.GROQ_API_KEY = val.trim();
+    document.getElementById('groq-key-status').textContent = '✓ Key stored (session only)';
+    document.getElementById('groq-key-status').style.color = 'var(--green)';
+  }
+}
+
+// Restore key from session on load
+(function() {
+  const k = sessionStorage.getItem('groq_api_key');
+  if (k) {
+    window.GROQ_API_KEY = k;
+    const inp = document.getElementById('groq-key-input');
+    if (inp) inp.value = k;
+  }
+})();
+
+async function groqAsk(prompt, temp=0.5) {
+  const key = window.GROQ_API_KEY || sessionStorage.getItem('groq_api_key');
+  if (!key) return null;
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        temperature: temp,
+        max_tokens: 300,
+        messages: [{role: 'user', content: prompt}]
+      })
+    });
+    const d = await r.json();
+    return d.choices?.[0]?.message?.content?.trim() || null;
+  } catch(e) { return null; }
+}
+
+async function testGroqKey() {
+  const statusEl = document.getElementById('groq-key-status');
+  statusEl.textContent = 'Testing…'; statusEl.style.color = 'var(--muted)';
+  const result = await groqAsk('Reply with exactly: OK', 0.0);
+  if (result && result.includes('OK')) {
+    statusEl.textContent = '✓ Connected to Groq';
+    statusEl.style.color = 'var(--green)';
+  } else {
+    statusEl.textContent = '✗ Failed — check key';
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+async function groqRenderBrief(deck) {
+  const parts = deck.bom.slice(0, 5).map(b => b.part).join(', ');
+  const prompt = `In 2 sentences, describe the ideal lighting and camera angle for a photorealistic CGI render of a ${deck.label} cyberdeck (${deck.sub}) containing: ${parts}. Be specific about light temperature (Kelvin), shadow direction, and lens focal length. No preamble.`;
+  return await groqAsk(prompt, 0.7);
+}
+
+async function groqAssemblyNarration(deck) {
+  const parts = deck.bom.map((b,i) => `${i+1}. ${b.part}`).join('\n');
+  const prompt = `Write ${deck.bom.length} numbered assembly steps for building the ${deck.label} cyberdeck. Use these parts:\n${parts}\nEach step is one sentence. Focus on physical assembly order. No preamble.`;
+  return await groqAsk(prompt, 0.3);
+}
 let currentMdFile=null, currentJsonFile=null;
 let headerVariants={};
 let exploded=false;
@@ -1959,6 +2040,27 @@ function selectDeck(id) {
 
   // Also load brain PCB into the main 3D viewer
   if (deck.brain) doCrawl(deck.brain);
+
+  // Groq AI: render brief in hero bar (async, non-blocking)
+  const briefEl = document.getElementById('deck-render-brief');
+  briefEl.textContent = '';
+  groqRenderBrief(deck).then(brief => {
+    if (brief) briefEl.textContent = '🎥 ' + brief;
+  });
+
+  // Groq AI: assembly narration in BOM tab (async, non-blocking)
+  const narrationId = 'deck-bom-narration';
+  let narEl = document.getElementById(narrationId);
+  if (!narEl) {
+    narEl = document.createElement('div');
+    narEl.id = narrationId;
+    narEl.style.cssText = 'margin-top:12px;padding:10px;background:rgba(124,92,216,.07);border:1px solid rgba(124,92,216,.2);border-radius:6px;font-size:.76rem;line-height:1.8;color:var(--muted);white-space:pre-wrap';
+    document.getElementById('dd-bom').appendChild(narEl);
+  }
+  narEl.textContent = '';
+  groqAssemblyNarration(deck).then(narration => {
+    if (narration) narEl.textContent = narration;
+  });
 }
 
 document.addEventListener('DOMContentLoaded', async ()=>{
