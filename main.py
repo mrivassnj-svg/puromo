@@ -414,7 +414,7 @@ def generate_firmware(req: FirmwareRequest):
     try:
         spec = dict(req.spec)
         spec["model"] = req.model_name
-        gen = FirmwareGenerator(spec, output_dir=str(OUTPUT_DIR))
+        gen = FirmwareGenerator(spec, output_root=str(OUTPUT_DIR))
         manifest = gen.generate()
         # Return manifest with relative file paths for UI
         manifest["files_list"] = [
