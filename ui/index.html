@@ -244,52 +244,73 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 </div>
 
 <!-- ── DECK VIEW ── -->
-<div id="t-deck" class="tab-pane" style="display:flex;flex-direction:column;gap:14px;padding:14px">
-  <div id="deck-hero" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:18px 22px;display:flex;align-items:flex-start;gap:18px">
-    <div id="deck-hat-badge" style="width:54px;height:54px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;font-weight:900">?</div>
-    <div style="flex:1">
-      <div id="deck-title" style="font-size:1.1rem;font-weight:700;margin-bottom:4px">Select a cyberdeck archetype →</div>
-      <div id="deck-goal" style="font-size:.82rem;color:var(--muted);line-height:1.6"></div>
+<div id="t-deck" class="tab-pane" style="display:flex;flex-direction:column;gap:0;padding:0">
+
+  <!-- Hero bar -->
+  <div id="deck-hero" style="padding:14px 18px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0">
+    <div id="deck-hat-badge" style="width:44px;height:44px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem">?</div>
+    <div style="flex:1;min-width:0">
+      <div id="deck-title" style="font-size:.95rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">← Select an archetype</div>
+      <div id="deck-goal" style="font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
     </div>
-    <div id="deck-safety-badge" style="font-size:.72rem;color:var(--yellow);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);border-radius:5px;padding:4px 9px;white-space:nowrap;flex-shrink:0"></div>
+    <div id="deck-safety-badge" style="font-size:.7rem;color:var(--yellow);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:4px;padding:3px 8px;white-space:nowrap;flex-shrink:0"></div>
+    <button class="btn btn-purple" style="font-size:.74rem;padding:5px 11px;flex-shrink:0" onclick="showTab('t-3d',document.querySelector('.tab[onclick*=\'t-3d\']'));ensureRenderer();onResize()">3D View →</button>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-    <!-- BOM -->
-    <div class="card">
-      <h3>Bill of Materials</h3>
-      <table class="dt" id="deck-bom-table">
-        <thead><tr><th>Qty</th><th>Part</th><th>Notes</th></tr></thead>
-        <tbody><tr><td colspan="3" style="color:var(--muted)">Select a deck.</td></tr></tbody>
-      </table>
-    </div>
-    <!-- Enclosure sketch -->
-    <div class="card">
-      <h3>Enclosure Sketch</h3>
-      <pre id="deck-enclosure" style="font-family:monospace;font-size:.78rem;color:var(--accent);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;overflow-x:auto;white-space:pre;margin:0">Select a deck.</pre>
-      <div id="deck-notes" style="font-size:.76rem;color:var(--muted);margin-top:8px;line-height:1.6"></div>
-    </div>
-  </div>
+  <!-- Two-column body -->
+  <div style="display:grid;grid-template-columns:1fr 380px;flex:1;min-height:0;overflow:hidden">
 
-  <!-- Wiring table -->
-  <div class="card">
-    <h3>Wiring Table</h3>
-    <table class="dt" id="deck-wiring-table">
-      <thead><tr><th>Module</th><th>Module Pin</th><th>Brain Pin / GPIO</th><th>Notes</th></tr></thead>
-      <tbody><tr><td colspan="4" style="color:var(--muted)">Select a deck.</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- Safety checklist -->
-  <div class="card">
-    <h3>⚠ Safety &amp; Legal</h3>
-    <div id="deck-safety" style="font-size:.8rem;line-height:1.8;color:var(--muted)">
-      Use only on gear you own, on isolated lab networks, or with written authorization.<br>
-      All logic is 3.3 V — never feed 5 V into GPIO pins.<br>
-      Never connect a LiPo directly to the Pi's 5 V pin; use a boost/charge board.<br>
-      Check radio-transmission regulations before enabling any transmit-capable module.
+    <!-- LEFT: 3D deck preview canvas -->
+    <div style="position:relative;background:#06080d;border-right:1px solid var(--border)">
+      <canvas id="deck-viewport" style="display:block;width:100%;height:100%;min-height:420px"></canvas>
+      <div style="position:absolute;top:10px;left:12px;font-size:.7rem;color:rgba(255,255,255,.25);pointer-events:none">Drag · Scroll · Right-drag pan</div>
+      <div id="deck-3d-label" style="position:absolute;bottom:10px;left:12px;font-size:.72rem;color:rgba(255,255,255,.3);pointer-events:none">Select a deck to preview</div>
     </div>
-  </div>
+
+    <!-- RIGHT: tabbed detail panel -->
+    <div style="display:flex;flex-direction:column;overflow:hidden">
+      <!-- Mini tab bar -->
+      <div style="display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
+        <div class="deck-dtab active" onclick="showDeckDetail('dd-bom',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">📦 BOM</div>
+        <div class="deck-dtab" onclick="showDeckDetail('dd-wire',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">🔌 Wiring</div>
+        <div class="deck-dtab" onclick="showDeckDetail('dd-enc',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">📐 Enclosure</div>
+        <div class="deck-dtab" onclick="showDeckDetail('dd-safe',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">⚠ Safety</div>
+      </div>
+
+      <!-- BOM checklist -->
+      <div id="dd-bom" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px">
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:8px">Check off parts as you source them.</div>
+        <div id="deck-bom-list"></div>
+        <div id="deck-bom-progress" style="margin-top:10px;font-size:.74rem;color:var(--muted)"></div>
+      </div>
+
+      <!-- Wiring SVG diagram -->
+      <div id="dd-wire" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px;display:none">
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:8px">Color key: <span style="color:#ef4444">■ PWR</span> <span style="color:#22c55e">■ GND</span> <span style="color:#3b82f6">■ SPI</span> <span style="color:#f59e0b">■ I2C</span> <span style="color:#a855f7">■ UART</span> <span style="color:#e8e8ea">■ USB/Other</span></div>
+        <svg id="deck-wire-svg" width="100%" viewBox="0 0 360 400" style="background:#06080d;border-radius:6px;border:1px solid var(--border)"></svg>
+      </div>
+
+      <!-- Enclosure sketch -->
+      <div id="dd-enc" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px;display:none">
+        <pre id="deck-enclosure" style="font-family:monospace;font-size:.77rem;color:var(--accent);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre;margin:0 0 10px 0"></pre>
+        <div id="deck-notes" style="font-size:.75rem;color:var(--muted);line-height:1.7"></div>
+      </div>
+
+      <!-- Safety -->
+      <div id="dd-safe" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px;display:none">
+        <div id="deck-safety" style="font-size:.8rem;line-height:2.0">
+          <div style="color:var(--yellow);font-weight:700;margin-bottom:8px">⚠ Always verify before powering anything.</div>
+          <div style="color:var(--muted)">• Use only on gear you own, on isolated lab networks, or with written authorization.</div>
+          <div style="color:var(--muted)">• All logic is 3.3 V — never feed 5 V into GPIO pins.</div>
+          <div style="color:var(--muted)">• Never connect a LiPo directly to a Pi's 5 V pin; use a boost/charge board.</div>
+          <div style="color:var(--muted)">• Insulate the battery. Add a 1–2 A fuse between battery and boost board.</div>
+          <div style="color:var(--muted)">• Check radio-transmission regulations before enabling any transmit-capable module.</div>
+          <div style="color:var(--muted)">• Keep a written scope/authorization for any test on systems you don't own.</div>
+          <div id="deck-safety-specific" style="margin-top:10px;padding:10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:6px;color:var(--yellow);font-size:.78rem;line-height:1.8"></div>
+        </div>
+      </div>
+    </div><!-- end right panel -->
+  </div><!-- end grid -->
 </div>
 
 <!-- ── 3D VIEW ── -->
@@ -1614,6 +1635,7 @@ const CYBERDECK_BUILDS = [
 ];
 
 let activeDeckId = null;
+let deckScene, deckCamera, deckRenderer, deckControls, deckAnimId;
 
 function renderHatDecks() {
   const el = document.getElementById('hat-deck-list');
@@ -1634,40 +1656,293 @@ function renderHatDecks() {
   });
 }
 
+// ── Deck detail sub-tabs ──────────────────────────────────────────────────────
+function showDeckDetail(id, el) {
+  document.querySelectorAll('.deck-detail').forEach(d => d.style.display = 'none');
+  document.querySelectorAll('.deck-dtab').forEach(t => {
+    t.style.borderBottomColor = 'transparent';
+    t.style.color = 'var(--muted)';
+  });
+  document.getElementById(id).style.display = '';
+  if (el) { el.style.borderBottomColor = 'var(--accent)'; el.style.color = 'var(--accent)'; }
+}
+
+// ── BOM checklist ─────────────────────────────────────────────────────────────
+let _bomChecked = {};
+function renderBomChecklist(deck) {
+  if (!_bomChecked[deck.id]) _bomChecked[deck.id] = {};
+  const checked = _bomChecked[deck.id];
+  const el = document.getElementById('deck-bom-list');
+  el.innerHTML = deck.bom.map((r, i) => `
+    <label style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer">
+      <input type="checkbox" ${checked[i] ? 'checked' : ''}
+        onchange="_bomChecked['${deck.id}'][${i}]=this.checked; updateBomProgress('${deck.id}')"
+        style="width:auto;margin-top:2px;flex-shrink:0;accent-color:${deck.color}"/>
+      <div>
+        <div style="font-size:.8rem;font-weight:600;${checked[i] ? 'text-decoration:line-through;color:var(--muted)' : ''}">${r.part}</div>
+        <div style="font-size:.7rem;color:var(--muted)">${r.qty !== 1 ? 'Qty: '+r.qty+' · ' : ''}${r.notes}</div>
+      </div>
+    </label>`).join('');
+  updateBomProgress(deck.id);
+}
+function updateBomProgress(deckId) {
+  const deck = CYBERDECK_BUILDS.find(d => d.id === deckId);
+  if (!deck) return;
+  const checked = _bomChecked[deckId] || {};
+  const done = Object.values(checked).filter(Boolean).length;
+  const total = deck.bom.length;
+  const pct = Math.round(done / total * 100);
+  const bar = `<div style="height:5px;background:var(--border);border-radius:3px;margin-top:6px;overflow:hidden">
+    <div style="height:100%;width:${pct}%;background:${deck.color};border-radius:3px;transition:width .3s"></div></div>`;
+  document.getElementById('deck-bom-progress').innerHTML =
+    `<span style="color:${deck.color};font-weight:700">${done}/${total}</span> parts sourced${bar}`;
+}
+
+// ── SVG wiring diagram ────────────────────────────────────────────────────────
+function wireColor(pin) {
+  const p = pin.toLowerCase();
+  if (p.includes('vcc') || p.includes('3v') || p.includes('5v') || p.includes('pwr') || p.includes('power')) return '#ef4444';
+  if (p.includes('gnd') || p.includes('ground')) return '#22c55e';
+  if (p.includes('sck') || p.includes('miso') || p.includes('mosi') || p.includes('spi') || p.includes('csn') || p.includes('ce')) return '#3b82f6';
+  if (p.includes('sda') || p.includes('scl') || p.includes('i2c')) return '#f59e0b';
+  if (p.includes('tx') || p.includes('rx') || p.includes('uart')) return '#a855f7';
+  return '#9ca3af';
+}
+
+function renderWiringSVG(deck) {
+  const svg = document.getElementById('deck-wire-svg');
+  const W = 360, H = Math.max(380, deck.wiring.length * 44 + 60);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // Brain PCB block on left
+  const brainX = 10, brainY = 30, brainW = 100, brainH = H - 60;
+  // Module blocks on right
+  const modX = 250, modStartY = 30;
+
+  // Group modules (deduplicate)
+  const modules = [...new Set(deck.wiring.map(w => w.module))];
+  const modH = 28, modGap = 8;
+
+  let svgContent = `
+    <rect x="${brainX}" y="${brainY}" width="${brainW}" height="${brainH}" rx="6"
+      fill="#1b4a1b" stroke="#22c55e" stroke-width="1.2"/>
+    <text x="${brainX + brainW/2}" y="${brainY + 14}" text-anchor="middle"
+      font-size="9" fill="#22c55e" font-weight="bold">BRAIN PCB</text>
+    <text x="${brainX + brainW/2}" y="${brainY + 26}" text-anchor="middle"
+      font-size="7" fill="#4a7a4a">Waveshare HAT</text>`;
+
+  modules.forEach((mod, mi) => {
+    const my = modStartY + mi * (modH + modGap);
+    svgContent += `
+      <rect x="${modX}" y="${my}" width="98" height="${modH}" rx="4"
+        fill="#151821" stroke="#2a2f42" stroke-width="1"/>
+      <text x="${modX + 49}" y="${my + 11}" text-anchor="middle"
+        font-size="8" fill="#e2e8f0" font-weight="bold">${mod.length > 18 ? mod.slice(0,16)+'…' : mod}</text>`;
+  });
+
+  // Wires
+  deck.wiring.forEach((w, wi) => {
+    const col = wireColor(w.pin);
+    const modIdx = modules.indexOf(w.module);
+    const my = modStartY + modIdx * (modH + modGap);
+    // Spread wires vertically within brain block
+    const brainPY = brainY + 40 + wi * ((brainH - 50) / Math.max(deck.wiring.length, 1));
+    const modPY = my + modH * 0.65;
+    const mx = (brainX + brainW + modX) / 2;
+    svgContent += `
+      <path d="M${brainX+brainW} ${brainPY} C${mx} ${brainPY} ${mx} ${modPY} ${modX} ${modPY}"
+        fill="none" stroke="${col}" stroke-width="1.4" stroke-opacity="0.8"/>
+      <circle cx="${brainX+brainW}" cy="${brainPY}" r="2" fill="${col}"/>
+      <circle cx="${modX}" cy="${modPY}" r="2" fill="${col}"/>
+      <text x="${mx}" y="${(brainPY+modPY)/2 - 2}" text-anchor="middle"
+        font-size="6.5" fill="${col}" opacity="0.9">${w.pin.slice(0,16)}</text>`;
+  });
+
+  svg.innerHTML = svgContent;
+}
+
+// ── Deck 3D preview renderer ──────────────────────────────────────────────────
+function initDeckRenderer() {
+  const canvas = document.getElementById('deck-viewport');
+  const W = canvas.parentElement.clientWidth || 500;
+  const H = canvas.parentElement.clientHeight || 420;
+  if (W < 10) return;
+
+  if (deckRenderer) { deckRenderer.dispose(); }
+  if (deckAnimId)   { cancelAnimationFrame(deckAnimId); }
+
+  deckScene  = new THREE.Scene();
+  deckScene.background = new THREE.Color(0x06080d);
+  deckScene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.1);
+  dl.position.set(120, 200, 150); dl.castShadow = true; deckScene.add(dl);
+  const dl2 = new THREE.DirectionalLight(0x5577ff, 0.35);
+  dl2.position.set(-80,-50,-80); deckScene.add(dl2);
+  const grid = new THREE.GridHelper(300, 40, 0x111820, 0x111820);
+  grid.position.y = -2; deckScene.add(grid);
+
+  deckCamera = new THREE.PerspectiveCamera(45, W/H, 0.1, 3000);
+  deckCamera.position.set(120, 90, 160);
+
+  deckRenderer = new THREE.WebGLRenderer({canvas, antialias: true});
+  deckRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  deckRenderer.setSize(W, H);
+  deckRenderer.shadowMap.enabled = true;
+  deckRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  deckControls = new THREE.OrbitControls(deckCamera, deckRenderer.domElement);
+  deckControls.enableDamping = true;
+  deckControls.dampingFactor = 0.08;
+  deckControls.minDistance = 30;
+  deckControls.maxDistance = 600;
+
+  function deckAnimate() {
+    deckAnimId = requestAnimationFrame(deckAnimate);
+    deckControls.update();
+    deckRenderer.render(deckScene, deckCamera);
+  }
+  deckAnimate();
+}
+
+function buildDeckScene(deck) {
+  if (!deckScene) return;
+  // Clear existing objects except lights and grid
+  const toRemove = deckScene.children.filter(c => c.userData.deckObj);
+  toRemove.forEach(o => deckScene.remove(o));
+
+  const col = new THREE.Color(deck.color);
+  function mat(hex, shine=50, rough=0.6) {
+    return new THREE.MeshPhongMaterial({color: new THREE.Color(hex), shininess: shine});
+  }
+  function add(mesh) { mesh.userData.deckObj = true; deckScene.add(mesh); return mesh; }
+  function box(w,h,d,x,y,z,hex,shine) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat(hex,shine));
+    m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; return add(m);
+  }
+  function cyl(r,h,x,y,z,hex,shine) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,20), mat(hex,shine));
+    m.position.set(x,y,z); m.castShadow=true; return add(m);
+  }
+
+  // ── Shared core: LiPo battery ──
+  box(50,8,20, -30,0,30, '#2a2a35', 20);           // battery pack
+  box(50,0.5,20, -30,4.3,30, col.getStyle(), 60);  // hat-color top strip
+  box(5,2,8, -4,4,30, '#888', 40);                 // JST connector
+
+  // ── Boost/charge board ──
+  box(28,2,18, 10,0,30, '#1a3a1a', 20);            // PCB
+  box(14,4,10, 10,2.5,30, '#111', 30);             // main IC block
+  box(5,6,5, 20,3,30, '#1a1a2a', 20);              // USB-C port
+  cyl(3,3, 2,3,30, '#888', 60);                    // cap
+
+  // ── Brain PCB (Waveshare 1.3" HAT 65×30mm) ──
+  box(65,1.6,30, 32,8,15, '#1b4a1b', 30);          // FR4
+  box(51,8.5,5.1, 25,10.5,3.5, '#0d0d14', 20);    // GPIO header
+  box(51,0.5,2, 25,17.5,3.5, '#c8a820', 120);     // gold pins
+  box(23.4,1.6,23.4, 12,10,15, '#9a9a9f', 80);    // display bezel
+  box(23.4,0.8,23.4, 12,11.4,15, '#04040a', 150); // screen
+  box(12,1.8,12, 40,10,15, '#1e1e24', 30);        // joystick base
+  cyl(2.4,5.5, 40,15.65,15, '#3c3c46', 50);       // joy nub
+  [8.5,15,21.5].forEach(bz => {
+    box(6,3.5,6, 55,10.75,bz, '#0e0e14', 20);     // button body
+    cyl(2.2,0.9, 55,13.2,bz, '#e8e8ea', 50);      // button cap
+  });
+
+  // ── Hat-specific addon modules ──
+  if (deck.id === 'white') {
+    box(40,2,25, 70,8,10, '#1a1a2a', 20);          // TFT 3.5"
+    box(80,2,30, 32,8,-20, '#111', 20);             // BBQ10 keyboard
+    cyl(3,15, 90,15,15, '#666', 30);               // GPS antenna
+  } else if (deck.id === 'red') {
+    box(20,2,15, 70,8,5, '#1a1a2a', 20);           // CC1101 PCB
+    cyl(4,22, 72,20,5, '#888', 40);                // sub-GHz antenna
+    box(25,3,25, 70,8,25, '#111', 20);             // PN532 NFC
+    box(10,2,10, 70,8,45, '#1a1a2a', 20);          // nRF24 module
+    cyl(2,18, 78,18,45, '#666', 30);               // 2.4GHz antenna
+  } else if (deck.id === 'blue') {
+    box(80,4,40, -10,8,-10, '#1a2a1a', 20);        // Pi 5 (larger board)
+    box(30,3,20, 80,8,10, '#111', 20);             // RTL-SDR
+    cyl(3,25, 92,20,10, '#888', 40);               // SDR antenna
+    box(60,1,10, 20,10,-15, '#222', 10);           // e-ink display
+    box(20,3,15, -10,8,35, '#111', 20);            // LAN tap
+  } else if (deck.id === 'purple') {
+    box(65,1.6,30, 32,8,-20, '#1b4a1b', 30);       // second PCB (ESP32 side)
+    box(25,3,15, -20,8,15, '#1a1a2a', 20);         // TFT attack side
+    box(25,1,20, 100,8,15, '#222', 10);            // e-ink defend side
+  } else if (deck.id === 'gray') {
+    cyl(3,25, 32,20,0, '#888', 40);                // LoRa antenna
+    cyl(3,10, 55,15,25, '#666', 30);               // GPS antenna
+    box(10,1,10, 10,10,15, '#111', 30);            // OLED
+    box(50,8,25, 32,0,15, '#111830', 20);          // T-Beam outline
+  } else if (deck.id === 'black') {
+    box(85,4,55, -15,8,-5, '#1a1a2a', 20);         // Pi 5 8GB
+    box(60,3,30, 85,8,0, '#111', 20);             // touchscreen
+    box(40,2,20, -20,8,50, '#1a2a1a', 20);        // GL.iNet router
+  } else if (deck.id === 'green') {
+    box(85,4,55, -15,8,-5, '#1a1a2a', 20);         // Pi 4/5
+    box(70,5,25, 60,8,0, '#111', 20);             // 5" HDMI display
+    // WS2812 LED strip (8 LEDs across top)
+    for (let i=0;i<8;i++) {
+      const ledC = i < 3 ? '#22c55e' : i < 6 ? '#f59e0b' : '#ef4444';
+      box(6,2,4, -15+i*8,12,-10, ledC, 100);
+    }
+  } else if (deck.id === 'yellow') {
+    box(32,3,22, 70,8,5, '#1a1a2a', 20);           // Cardputer
+    box(15,1,8, 70,10,25, '#333', 30);             // SOIC clip
+    box(20,2,15, 70,8,38, '#111', 20);             // CH341A
+    box(30,1.5,10, 10,8,45, '#1a2a1a', 20);       // breadboard
+  } else if (deck.id === 'orange') {
+    box(32,3,22, 70,8,5, '#1a1a2a', 20);           // ESP32 Cardputer
+    box(20,2,14, 70,8,30, '#111', 20);             // small TFT
+    cyl(5,8, 85,12,15, '#c8a820', 40);             // antenna
+  }
+
+  // ── Enclosure outline (hat-color accent frame) ──
+  const EW = deck.id==='blue'||deck.id==='black'||deck.id==='green' ? 160 : 110;
+  const EH = 50, ED = 80;
+  const edgeMat = new THREE.LineBasicMaterial({color: col, transparent: true, opacity: 0.5});
+  [[0,0],[EW,0],[EW,ED],[0,ED]].forEach(([ex,ez]) => {
+    const pts = [new THREE.Vector3(ex-10,-2,ez-10), new THREE.Vector3(ex-10,EH,ez-10)];
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), edgeMat);
+    line.userData.deckObj = true;
+    deckScene.add(line);
+  });
+
+  // Camera target
+  deckControls.target.set(EW/2, 10, ED/2);
+  deckCamera.position.set(EW/2 - 20, 80, ED + 100);
+  deckControls.update();
+
+  document.getElementById('deck-3d-label').textContent =
+    `${deck.emoji} ${deck.label} — ${deck.bom.length} components`;
+  document.getElementById('deck-3d-label').style.color = deck.color;
+}
+
 function selectDeck(id) {
   activeDeckId = id;
   const deck = CYBERDECK_BUILDS.find(d => d.id === id);
   if (!deck) return;
 
-  // Highlight sidebar item
+  // Highlight sidebar
   document.querySelectorAll('.hat-item').forEach(el => el.classList.remove('active'));
   const item = document.getElementById(`hat-item-${id}`);
   if (item) item.classList.add('active');
 
-  // Hero banner
-  document.getElementById('deck-hat-badge').textContent = deck.emoji;
-  document.getElementById('deck-hat-badge').style.background = deck.color + '33';
-  document.getElementById('deck-hat-badge').style.color = deck.color;
+  // Hero bar
+  const badge = document.getElementById('deck-hat-badge');
+  badge.textContent = deck.emoji;
+  badge.style.background = deck.color + '28';
+  badge.style.boxShadow = `0 0 0 2px ${deck.color}55`;
   document.getElementById('deck-title').textContent = `${deck.emoji} ${deck.label} — ${deck.sub}`;
   document.getElementById('deck-goal').textContent = deck.goal;
   document.getElementById('deck-safety-badge').textContent = '⚠ ' + deck.safety;
+  document.getElementById('deck-safety-specific').textContent = deck.safety;
 
-  // BOM table
-  document.querySelector('#deck-bom-table tbody').innerHTML =
-    deck.bom.map(r => `<tr>
-      <td style="font-family:monospace;color:var(--accent)">${r.qty}</td>
-      <td><b>${r.part}</b></td>
-      <td style="color:var(--muted)">${r.notes}</td>
-    </tr>`).join('');
+  // BOM checklist
+  renderBomChecklist(deck);
 
-  // Wiring table
-  document.querySelector('#deck-wiring-table tbody').innerHTML =
-    deck.wiring.map(r => `<tr>
-      <td style="font-weight:600;color:var(--text)">${r.module}</td>
-      <td style="font-family:monospace;font-size:.78rem;color:var(--green)">${r.pin}</td>
-      <td style="font-family:monospace;font-size:.78rem;color:var(--accent)">${r.brain}</td>
-      <td style="font-size:.74rem;color:var(--muted)">${r.notes}</td>
-    </tr>`).join('');
+  // SVG wiring diagram
+  renderWiringSVG(deck);
 
   // Enclosure sketch
   document.getElementById('deck-enclosure').textContent = deck.enclosure;
@@ -1676,7 +1951,13 @@ function selectDeck(id) {
   // Switch to Deck tab
   showTab('t-deck', document.querySelector('.tab[onclick*="t-deck"]'));
 
-  // Auto-load the deck's brain PCB into the 3D viewer
+  // Init deck renderer if needed, then build scene
+  requestAnimationFrame(() => {
+    if (!deckRenderer) initDeckRenderer();
+    buildDeckScene(deck);
+  });
+
+  // Also load brain PCB into the main 3D viewer
   if (deck.brain) doCrawl(deck.brain);
 }
 
