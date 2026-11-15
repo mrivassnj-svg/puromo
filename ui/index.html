@@ -641,44 +641,63 @@ const PALETTE = [
 //  Three.js 3D Renderer
 // ═══════════════════════════════════════════════════════
 let scene, camera, renderer, controls, shellObjects={};
+let threeInited = false;
 
 function initThree() {
-  const canvas = document.getElementById('viewport');
-  const W = canvas.parentElement.clientWidth - 28;
-  const H = Math.max(360, Math.round(W * 0.45));
-  canvas.width = W; canvas.height = H;
-
-  scene    = new THREE.Scene();
+  // Scene and camera are created immediately (no canvas size needed)
+  scene = new THREE.Scene();
   scene.background = new THREE.Color(0x070a0f);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-  const dLight = new THREE.DirectionalLight(0xffffff, 0.9);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const dLight = new THREE.DirectionalLight(0xffffff, 1.0);
   dLight.position.set(100, 180, 120);
+  dLight.castShadow = true;
   scene.add(dLight);
-  const dLight2 = new THREE.DirectionalLight(0x8899ff, 0.3);
+  const dLight2 = new THREE.DirectionalLight(0x6688cc, 0.4);
   dLight2.position.set(-80, -60, -100);
   scene.add(dLight2);
+  const dLight3 = new THREE.DirectionalLight(0xffffff, 0.25);
+  dLight3.position.set(0, -100, 0);
+  scene.add(dLight3);
 
-  // Grid
-  const grid = new THREE.GridHelper(200, 40, 0x1e2335, 0x1e2335);
+  const grid = new THREE.GridHelper(300, 50, 0x1a1f30, 0x1a1f30);
   grid.position.y = -1;
   scene.add(grid);
 
-  camera = new THREE.PerspectiveCamera(45, W/H, 0.1, 5000);
+  camera = new THREE.PerspectiveCamera(45, 16/9, 0.1, 5000);
   camera.position.set(80, 60, 110);
 
-  renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  // Renderer is deferred until the canvas is visible (non-zero size)
+  window.addEventListener('resize', onResize);
+}
+
+function ensureRenderer() {
+  if (threeInited) return;
+  const canvas = document.getElementById('viewport');
+  const W = canvas.parentElement.clientWidth - 28;
+  const H = Math.max(400, Math.round(W * 0.52));
+  if (W < 10) return;   // still hidden — try again later
+  canvas.width = W; canvas.height = H;
+
+  renderer = new THREE.WebGLRenderer({canvas, antialias: true, alpha: false});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(W, H);
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding || 3001;
+
+  camera.aspect = W / H;
+  camera.updateProjectionMatrix();
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.minDistance = 20;
   controls.maxDistance = 800;
+  controls.target.set(35, 20, 15);
+  controls.update();
 
+  threeInited = true;
   animate();
-  window.addEventListener('resize', onResize);
 }
 
 function animate() {
@@ -691,7 +710,8 @@ function onResize() {
   if (!renderer) return;
   const canvas = document.getElementById('viewport');
   const W = canvas.parentElement.clientWidth - 28;
-  const H = Math.max(360, Math.round(W*0.45));
+  const H = Math.max(400, Math.round(W*0.52));
+  if (W < 10) return;
   camera.aspect = W/H;
   camera.updateProjectionMatrix();
   renderer.setSize(W,H);
@@ -1351,6 +1371,10 @@ function showTab(id,el) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById(id).style.display='';
   if(el) el.classList.add('active');
+  // Boot the WebGL renderer the first time the 3D tab becomes visible
+  if (id === 't-3d') {
+    requestAnimationFrame(()=>{ ensureRenderer(); onResize(); });
+  }
 }
 
 // ═══════════════════════════════════════════════════════
