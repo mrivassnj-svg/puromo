@@ -690,7 +690,7 @@ function toggleExplode() {
   }
 }
 
-// Build the 3D shell from geometry data
+// Build the 3D shell from geometry data — exploded assembly view so PCB is always visible
 function buildShell3D(geom) {
   // Clear old shell
   Object.values(shellObjects).forEach(o=>{ if(o) scene.remove(o); });
@@ -698,134 +698,212 @@ function buildShell3D(geom) {
 
   if (!geom) return;
 
-  const W  = geom.shell_width_mm  || 70;
-  const H  = geom.shell_height_mm || 35;
-  const D  = geom.shell_depth_mm  || 20;
-  const WT = 2.0; // wall thickness
-  const FT = 2.5; // floor thickness
-  const LT = 1.8; // lid thickness
+  const W   = geom.shell_width_mm  || 70;
+  const H   = geom.shell_height_mm || 35;
+  const D   = geom.shell_depth_mm  || 20;
+  const BW  = geom.board_width_mm  || 65;
+  const BH  = geom.board_height_mm || 30;
+  const WT  = 2.0;   // wall thickness
+  const FT  = 2.5;   // floor thickness
+  const LT  = 1.8;   // lid thickness
+  const BT  = 1.6;   // board thickness
+  const SOH = 3.0;   // standoff height
+  // Explode gap — lifts the lid clear so the PCB layer is fully visible
+  const EXPLODE = D * 0.65;
 
-  // Helper: rounded-box (approximated as BoxGeometry for now)
-  function mat(colHex, opacity=1) {
-    const m = new THREE.MeshPhongMaterial({
+  function mat(colHex, opacity=1, shine=60) {
+    return new THREE.MeshPhongMaterial({
       color: new THREE.Color(colHex),
-      opacity, transparent: opacity<1,
-      shininess: 60,
+      opacity, transparent: opacity<1, shininess: shine,
     });
-    return m;
   }
 
-  // ── Bottom case ──
-  const splitZ  = D - LT - 1;  // parting line Z
-  const floorH  = FT;
-  const shellH  = splitZ - floorH;
+  // ── Bottom shell half (Y=0 at floor bottom) ──
+  const splitY = D - LT - 1;   // parting line height
 
-  const bottomGeo = new THREE.BoxGeometry(W, floorH, H);
-  const bottomObj = new THREE.Mesh(bottomGeo, mat(SHELL_PARTS.bottom.colour));
-  bottomObj.position.set(W/2, floorH/2, H/2);
+  // Floor plate
+  const bottomObj = new THREE.Mesh(new THREE.BoxGeometry(W, FT, H), mat(SHELL_PARTS.bottom.colour));
+  bottomObj.position.set(W/2, FT/2, H/2);
   scene.add(bottomObj);
   shellObjects.bottom = bottomObj;
 
-  // Walls
-  const wallData = [
-    // front  [wx,wy,wz, px,py,pz]
-    [W, shellH, WT,   W/2, floorH+shellH/2, WT/2],
-    // back
-    [W, shellH, WT,   W/2, floorH+shellH/2, H-WT/2],
-    // left
-    [WT, shellH, H-2*WT, WT/2, floorH+shellH/2, H/2],
-    // right
-    [WT, shellH, H-2*WT, W-WT/2, floorH+shellH/2, H/2],
-  ];
+  // 4 walls (front/back/left/right), open top
+  const wallH = splitY - FT;
   const wallGroup = new THREE.Group();
-  wallData.forEach(([ww,wh,wd,px,py,pz])=>{
-    const g = new THREE.BoxGeometry(ww,wh,wd);
-    const m = new THREE.Mesh(g, mat(SHELL_PARTS.bottom.colour));
-    m.position.set(px,py,pz);
-    wallGroup.add(m);
+  [
+    [W,   wallH, WT,     W/2,      FT+wallH/2,  WT/2    ],  // front
+    [W,   wallH, WT,     W/2,      FT+wallH/2,  H-WT/2  ],  // back
+    [WT,  wallH, H-2*WT, WT/2,     FT+wallH/2,  H/2     ],  // left
+    [WT,  wallH, H-2*WT, W-WT/2,   FT+wallH/2,  H/2     ],  // right
+  ].forEach(([ww,wh,wd,px,py,pz])=>{
+    wallGroup.add(new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd), mat(SHELL_PARTS.bottom.colour)));
+    wallGroup.children[wallGroup.children.length-1].position.set(px,py,pz);
   });
   scene.add(wallGroup);
   shellObjects.walls = wallGroup;
 
-  // ── Lid ──
-  const lidGroup = new THREE.Group();
-  const lidBase  = new THREE.Mesh(new THREE.BoxGeometry(W, LT, H), mat(SHELL_PARTS.lid.colour));
-  lidBase.position.set(W/2, splitZ + LT/2, H/2);
-  lidGroup.add(lidBase);
+  // ── PCB layer — always visible, sits at correct standoff height ──
+  const pcbY = FT + SOH;   // bottom face of PCB
 
-  // Display cutout (recessed window)
+  // FR4 board substrate
+  const pcbGeo = new THREE.BoxGeometry(BW, BT, BH);
+  const pcbMesh = new THREE.Mesh(pcbGeo, mat('#1b4a1b', 1.0, 30));
+  pcbMesh.position.set(BW/2, pcbY + BT/2, BH/2);
+  pcbMesh.name = 'pcb_placeholder';
+  scene.add(pcbMesh);
+  shellObjects.pcb = pcbMesh;
+
+  // Mounting bosses (standoffs)
+  const bossGroup = new THREE.Group();
+  (geom.mounting_bosses||[]).forEach(b=>{
+    const bg = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, SOH, 16);
+    const bm = new THREE.Mesh(bg, mat(SHELL_PARTS.stand.colour));
+    bm.position.set(b.cx, FT + SOH/2, b.cy);
+    bossGroup.add(bm);
+  });
+  scene.add(bossGroup);
+  shellObjects.bosses = bossGroup;
+
+  // ── Components on PCB — immediately visible ──
+  const compGroup = new THREE.Group();
+  const compY = pcbY + BT;   // top face of PCB
+
+  // Display module (silver bezel + dark screen + blue glow)
   const dc = geom.display_cutout;
   if (dc && dc.w > 0) {
-    const winGeo = new THREE.BoxGeometry(dc.w, LT+0.2, dc.h);
-    const winMesh = new THREE.Mesh(winGeo, mat('#0a0c14'));
-    winMesh.position.set(dc.x+dc.w/2, splitZ+LT/2, dc.y+dc.h/2);
+    const BEZEL = 1.2;
+    // Bezel body
+    const dispBody = new THREE.Mesh(
+      new THREE.BoxGeometry(dc.w + 2*BEZEL, 1.6, dc.h + 2*BEZEL),
+      mat('#aaaaaa', 1.0, 80)
+    );
+    dispBody.position.set(dc.x + dc.w/2, compY + 0.8, dc.y + dc.h/2);
+    compGroup.add(dispBody);
+    // Screen glass
+    const screen = new THREE.Mesh(
+      new THREE.BoxGeometry(dc.w, 0.8, dc.h),
+      mat('#050508', 1.0, 120)
+    );
+    screen.position.set(dc.x + dc.w/2, compY + 1.6, dc.y + dc.h/2);
+    compGroup.add(screen);
+    // IPS glow
+    const glow = new THREE.Mesh(
+      new THREE.BoxGeometry(dc.w - 1, 0.15, dc.h - 1),
+      mat('#2255aa', 0.75, 0)
+    );
+    glow.position.set(dc.x + dc.w/2, compY + 1.65, dc.y + dc.h/2);
+    compGroup.add(glow);
+  }
+
+  // 40-pin GPIO header (black block + gold highlight)
+  const hdrBody = new THREE.Mesh(
+    new THREE.BoxGeometry(51.0, 8.5, 5.1),
+    mat('#111118', 1.0, 20)
+  );
+  hdrBody.position.set(7.1 + 51.0/2, compY + 4.25, 3.5 + 5.1/2);
+  compGroup.add(hdrBody);
+  // Gold pin strip
+  const pinStrip = new THREE.Mesh(
+    new THREE.BoxGeometry(49.0, 0.5, 2.0),
+    mat('#c8a820', 1.0, 120)
+  );
+  pinStrip.position.set(7.1 + 51.0/2, compY + 8.5, 3.5 + 1.0);
+  compGroup.add(pinStrip);
+
+  // 5-way joystick
+  const joy = geom.joystick_aperture;
+  const joySpec = geom.joystick_center_mm || (joy ? [joy.cx, joy.cy] : null);
+  if (joySpec) {
+    const [jx, jz] = joySpec;
+    // Square base
+    compGroup.add(Object.assign(
+      new THREE.Mesh(new THREE.BoxGeometry(12, 1.8, 12), mat('#222228', 1.0, 30)),
+      {position: new THREE.Vector3(jx, compY + 0.9, jz)}
+    ));
+    // Nub cylinder
+    const nub = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 5.5, 20), mat('#444450', 1.0, 50));
+    nub.position.set(jx, compY + 1.8 + 2.75, jz);
+    compGroup.add(nub);
+    // Cap
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 2.5, 1.2, 20), mat('#555560', 1.0, 60));
+    cap.position.set(jx, compY + 1.8 + 5.5 + 0.6, jz);
+    compGroup.add(cap);
+  }
+
+  // Tactile buttons (KEY1/2/3)
+  (geom.button_positions_mm || []).forEach(([bx, bz])=>{
+    // Housing
+    compGroup.add(Object.assign(
+      new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 6), mat('#111116', 1.0, 20)),
+      {position: new THREE.Vector3(bx, compY + 1.75, bz)}
+    ));
+    // White cap
+    const bcap = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 1.0, 16), mat('#e8e8e8', 1.0, 40));
+    bcap.position.set(bx, compY + 3.5 + 0.5, bz);
+    compGroup.add(bcap);
+  });
+
+  // Controller IC (small black QFP near display)
+  const icX = (dc ? dc.x + dc.w + 2.0 : BW * 0.6);
+  const icZ = (dc ? dc.y + 2.0 : BH * 0.3);
+  compGroup.add(Object.assign(
+    new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.0, 5.5), mat('#0a0a10', 1.0, 60)),
+    {position: new THREE.Vector3(icX + 2.75, compY + 0.5, icZ + 2.75)}
+  ));
+
+  scene.add(compGroup);
+  shellObjects.components = compGroup;
+
+  // ── Lid — raised by EXPLODE gap so PCB layer is visible ──
+  const lidY = splitY + EXPLODE;
+  const lidGroup = new THREE.Group();
+
+  // Lid plate
+  const lidBase = new THREE.Mesh(new THREE.BoxGeometry(W, LT, H), mat(SHELL_PARTS.lid.colour));
+  lidBase.position.set(W/2, lidY + LT/2, H/2);
+  lidGroup.add(lidBase);
+
+  // Display window in lid
+  if (dc && dc.w > 0) {
+    const winMesh = new THREE.Mesh(new THREE.BoxGeometry(dc.w, LT+0.2, dc.h), mat('#050508'));
+    winMesh.position.set(dc.x + dc.w/2, lidY + LT/2, dc.y + dc.h/2);
     lidGroup.add(winMesh);
     // Glass pane
-    const glassGeo = new THREE.BoxGeometry(dc.w-0.4, 0.3, dc.h-0.4);
-    const glassMesh = new THREE.Mesh(glassGeo, mat('#aaddff', 0.35));
-    glassMesh.position.set(dc.x+dc.w/2, splitZ+LT+0.1, dc.y+dc.h/2);
+    const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(dc.w-0.4, 0.3, dc.h-0.4), mat('#aaddff', 0.35));
+    glassMesh.position.set(dc.x + dc.w/2, lidY + LT + 0.1, dc.y + dc.h/2);
     lidGroup.add(glassMesh);
+  }
+
+  // Button holes in lid
+  (geom.button_apertures||[]).forEach(b=>{
+    const bhole = new THREE.Mesh(new THREE.CylinderGeometry(b.r||2, b.r||2, LT+0.2, 16), mat('#050508'));
+    bhole.position.set(b.cx, lidY + LT/2, b.cy);
+    lidGroup.add(bhole);
+  });
+
+  // Joystick hole in lid
+  if (joy && joy.r > 0) {
+    const jhole = new THREE.Mesh(new THREE.CylinderGeometry(joy.r||6, joy.r||6, LT+0.2, 24), mat('#050508'));
+    jhole.position.set(joy.cx, lidY + LT/2, joy.cy);
+    lidGroup.add(jhole);
   }
 
   scene.add(lidGroup);
   shellObjects.lid = lidGroup;
 
-  // ── PCB (green board placeholder — replaced by STL mesh when available) ──
-  const pcbGeo = new THREE.BoxGeometry(
-    geom.board_width_mm||65, 1.6, geom.board_height_mm||30
-  );
-  const pcbMat = new THREE.MeshPhongMaterial({color: new THREE.Color('#1a4a1a'), opacity: 0.9, transparent: true});
-  const pcb = new THREE.Mesh(pcbGeo, pcbMat);
-  pcb.position.set(
-    (geom.pcb_offset_x||3) + (geom.board_width_mm||65)/2,
-    geom.pcb_z_from_floor||5.5,
-    (geom.pcb_offset_y||3) + (geom.board_height_mm||30)/2
-  );
-  pcb.name = 'pcb_placeholder';
-  scene.add(pcb);
-  shellObjects.pcb = pcb;
-
-  // ── Mounting bosses ──
-  const bossGroup = new THREE.Group();
-  (geom.mounting_bosses||[]).forEach(b=>{
-    const g = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, b.depth||3, 16);
-    const m = new THREE.Mesh(g, mat(SHELL_PARTS.stand.colour));
-    m.position.set(b.cx, (b.depth||3)/2 + FT, b.cy);
-    bossGroup.add(m);
+  // ── Dashed ghost lines connecting exploded layers (edge loops) ──
+  const edgeMat = new THREE.LineBasicMaterial({color: 0x334455, transparent: true, opacity: 0.35});
+  [[0,0],[W,0],[W,H],[0,H]].forEach(([ex,ez])=>{
+    const pts = [new THREE.Vector3(ex,splitY,ez), new THREE.Vector3(ex,lidY,ez)];
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), edgeMat));
   });
-  scene.add(bossGroup);
-  shellObjects.bosses = bossGroup;
 
-  // ── Button caps ──
-  const btnGroup = new THREE.Group();
-  (geom.button_apertures||[]).forEach(b=>{
-    const g = new THREE.CylinderGeometry(b.r-0.1||1.9, b.r-0.1||1.9, 2.5, 12);
-    const m = new THREE.Mesh(g, mat(SHELL_PARTS.button.colour));
-    m.position.set(b.cx, splitZ + LT + 1.3, b.cy);
-    btnGroup.add(m);
-  });
-  scene.add(btnGroup);
-  shellObjects.buttons = btnGroup;
-
-  // ── Joystick ──
-  const joy = geom.joystick_aperture;
-  if (joy && joy.r > 0) {
-    const jg = new THREE.CylinderGeometry(joy.r*0.7||4, joy.r||6, 8, 16);
-    const jm = new THREE.Mesh(jg, mat('#333355'));
-    jm.position.set(joy.cx, splitZ + LT + 4, joy.cy);
-    scene.add(jm);
-    shellObjects.joystick = jm;
-  }
-
-  // Centre camera on shell
-  controls.target.set(W/2, D/3, H/2);
-  camera.position.set(W/2 + W*0.9, D*1.5, H/2 + H*1.4);
+  // Camera: angled from above-front so the open shell interior is clearly visible
+  controls.target.set(W/2, (lidY + pcbY)/2, H/2);
+  camera.position.set(W/2 - W*0.3, lidY + D*1.1, H/2 + H*1.8);
   controls.update();
 
-  // Update 2D preview
   draw2D(geom);
-
-  // Update dim KV
   updateDimKV(geom);
 }
 
@@ -1459,6 +1537,8 @@ function loadPcbStl(url) {
     }
     scene.add(pcbMesh);
     shellObjects.pcb = pcbMesh;
+    // Hide Three.js component proxies — STL has the real geometry now
+    if(shellObjects.components) shellObjects.components.visible = false;
     statusOk('PCB STL mesh loaded (' + Math.round(geometry.attributes.position.count/3) + ' triangles)');
     renderer.render(scene, camera);
   }, undefined, function(err) {
