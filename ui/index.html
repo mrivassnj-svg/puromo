@@ -1300,8 +1300,59 @@ function buildShell3D(geom) {
     lidGroup.add(jhole);
   }
 
+  // Camera aperture in lid — "the eyes" (framework R2a). The ribbon route
+  // is in the assembly notes; safety of the zone is the overlap map's job.
+  const cam = geom.camera_aperture;
+  if (cam && cam.r > 0) {
+    const chole = new THREE.Mesh(new THREE.CylinderGeometry(cam.r, cam.r, LT+0.2, 24), mat('#050508'));
+    chole.position.set(cam.cx, lidY + LT/2, Z(cam.cy));
+    lidGroup.add(chole);
+    const cring = new THREE.Mesh(new THREE.TorusGeometry(cam.r + 1.3, 0.5, 8, 32), mat('#14b8a6', 0.9));
+    cring.rotation.x = Math.PI/2;
+    cring.position.set(cam.cx, lidY + LT + 0.2, Z(cam.cy));
+    lidGroup.add(cring);
+  }
+
   scene.add(lidGroup);
   shellObjects.lid = lidGroup;
+
+  // ── Battery pack in its bay (framework R4e) ──
+  // Rendered in place in the bottom case, sized from the chosen pack
+  // (geometry.battery_bay carries the pack footprint + thickness).
+  const bay = geom.battery_bay;
+  if (bay && bay.w > 0) {
+    const bd = bay.depth || 6;
+    const bat = new THREE.Mesh(
+      new THREE.BoxGeometry(bay.w - 1, bd, bay.h - 1),
+      mat('#2f6f4f', 0.85));
+    bat.position.set(bay.x + bay.w/2, FT + bd/2 + 0.3, Z(bay.y + bay.h/2));
+    bat.castShadow = true;
+    scene.add(bat);
+    shellObjects.battery = bat;
+  }
+
+  // ── Overlap markers (framework R5) ──
+  // Each overlap from the geometry engine is drawn as a ring + X in the
+  // reserved conflict colour, floating just above the lid at the exact
+  // conflicting zone (shell coords, flipped through Z() like everything
+  // else). If the system misplaces something, the flaw is visible here
+  // before anything is printed.
+  (geom.overlaps || []).forEach(o => {
+    const grp = new THREE.Group();
+    const m = new THREE.MeshBasicMaterial({ color: CONFLICT_COLOUR });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(o.r, 0.45, 8, 40), m);
+    ring.rotation.x = Math.PI/2;
+    grp.add(ring);
+    const diag = o.r * 1.5;
+    const x1 = new THREE.Mesh(new THREE.BoxGeometry(diag, 0.5, 1.1), m);
+    x1.rotation.y = Math.PI/4; grp.add(x1);
+    const x2 = new THREE.Mesh(new THREE.BoxGeometry(diag, 0.5, 1.1), m);
+    x2.rotation.y = -Math.PI/4; grp.add(x2);
+    grp.position.set(o.cx, lidY + LT + 1.4, Z(o.cy));
+    grp.userData.overlapMarker = true;
+    scene.add(grp);
+    shellObjects['overlap_' + o.a + '_' + o.b] = grp;
+  });
 
   // ── Dashed ghost lines connecting exploded layers (edge loops) ──
   const edgeMat = new THREE.LineBasicMaterial({color: 0x334455, transparent: true, opacity: 0.35});
@@ -1399,6 +1450,30 @@ function draw2D(g) {
     ctx.strokeStyle='#f59e0b';
     ctx.beginPath(); ctx.arc(mx(joy.cx),my(joy.cy),joy.r*scale,0,Math.PI*2); ctx.stroke();
   }
+  // Battery bay footprint (framework R4)
+  const bay=g.battery_bay;
+  if(bay&&bay.w){
+    ctx.strokeStyle='#2f6f4f'; ctx.lineWidth=1;
+    ctx.strokeRect(mx(bay.x),my(bay.y+bay.h),bay.w*scale,bay.h*scale);
+  }
+  // Camera aperture — the eyes (framework R2a)
+  const cam=g.camera_aperture;
+  if(cam&&cam.r){
+    ctx.strokeStyle='#14b8a6'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.arc(mx(cam.cx),my(cam.cy),cam.r*scale,0,Math.PI*2); ctx.stroke();
+  }
+  // Overlap markers (framework R5): reserved-colour ring + X at the
+  // conflicting zone — the 2D blueprint shows the same safeguard marks
+  // as the 3D Placement view.
+  (g.overlaps||[]).forEach(o=>{
+    const px=mx(o.cx), py=my(o.cy), pr=Math.max(3,o.r*scale);
+    ctx.strokeStyle='#ff2d78'; ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.arc(px,py,pr,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px-pr*0.7,py-pr*0.7); ctx.lineTo(px+pr*0.7,py+pr*0.7);
+    ctx.moveTo(px+pr*0.7,py-pr*0.7); ctx.lineTo(px-pr*0.7,py+pr*0.7);
+    ctx.stroke();
+  });
 }
 
 // ═══════════════════════════════════════════════════════
