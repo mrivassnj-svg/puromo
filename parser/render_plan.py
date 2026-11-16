@@ -44,6 +44,22 @@ from step 1); each frame carries a `lid` state — "exploded" (hovering
 above the case, the standard SOP diagram view) until the close step,
 then "closed". Button caps, camera and display glass are positioned
 on the lid, so the imaging script moves them with the lid state.
+
+Camera intent (Requirement 6c): each frame also carries a `camera`
+dict {view, layout, screen_on} derived from the group the step
+introduces, so the photograph serves the step being documented:
+
+    printed parts step → view "top",  layout "kit" (parts laid out)
+    inserts step       → view "below" (bosses seen from underneath)
+    HAT step           → view "above" (watching the board seat)
+    display step       → view "front" (nearly face-on to the lid)
+    power-on step      → view "hero", screen_on=True (screen lit)
+    everything else    → view "home" (the consistent 3/4 SOP angle)
+
+The imaging script turns the intent into an actual camera position
+per frame, auto-framed on the objects visible in that frame.
+`screen_on` is presentation only: exactly one frame — the last —
+has it set.
 """
 
 import hashlib
@@ -220,20 +236,34 @@ def _battery_info(spec: dict, geom: dict, selection: dict) -> dict:
 # Plan construction
 # ---------------------------------------------------------------------------
 
-def _frame_camera(geom: dict) -> dict:
-    """Fixed SOP camera: front-right, above, looking at the stack.
-    Positions in mm, in the shell generator's corner-origin frame
-    (x = width, y = height, z = up). The imaging script converts."""
-    W = float(geom.get("shell_width_mm") or 70)
-    H = float(geom.get("shell_height_mm") or 35)
-    D = float(geom.get("shell_depth_mm") or 32)
-    return {
-        "preset": "iso_front",
-        "location_mm": [round(W * 0.92, 1), round(-(H + D * 1.05), 1),
-                        round(D * 1.5, 1)],
-        "look_at_mm": [round(W / 2, 1), round(H / 2, 1),
-                       round(D * 0.3, 1)],
-    }
+# Camera views a frame may request (Requirement 6c). The imaging
+# script maps each name to azimuth/elevation/distance around the
+# frame's visible bounding box.
+FRAME_VIEWS = ("top", "below", "home", "above", "front", "hero")
+
+
+def _step_camera(new_groups: set) -> dict:
+    """Camera intent for one assembly step, from the group(s) the
+    step introduces (Requirement 6c). Priority order matters when a
+    title matches several rules: the finale outranks the kit, which
+    outranks inserts, the HAT seating and the display."""
+    if "final" in new_groups:
+        return {"view": "hero", "layout": "assembly",
+                "screen_on": True}
+    if "printed_parts" in new_groups:
+        return {"view": "top", "layout": "kit",
+                "screen_on": False}
+    if "inserts" in new_groups:
+        return {"view": "below", "layout": "assembly",
+                "screen_on": False}
+    if "hat_board" in new_groups:
+        return {"view": "above", "layout": "assembly",
+                "screen_on": False}
+    if "display_lid" in new_groups:
+        return {"view": "front", "layout": "assembly",
+                "screen_on": False}
+    return {"view": "home", "layout": "assembly",
+            "screen_on": False}
 
 
 def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
@@ -270,7 +300,6 @@ def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
 
     frames = []
     cumulative = set()
-    cam = _frame_camera(geom)
     for i, step in enumerate(assembly_steps or []):
         title = str(step.get("title") or "")
         low = title.lower()
@@ -300,9 +329,17 @@ def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
             "lid": ("closed" if ("closed_shell" in cumulative
                                  or "final" in cumulative)
                     else "exploded"),
-            "camera": cam,
+            "camera": _step_camera(new_groups),
             "filename": f"step_{step_index:02d}.png",
         })
+
+    # The story ends on the finished, working device: if no step
+    # introduced the `final` state (so no frame is flagged), upgrade
+    # the last frame to the hero shot so exactly one frame — the
+    # last — carries screen_on.
+    if frames and not any(f["camera"]["screen_on"] for f in frames):
+        frames[-1]["camera"] = {"view": "hero", "layout": "assembly",
+                                "screen_on": True}
 
     return {
         "version": 1,
