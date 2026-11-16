@@ -2252,35 +2252,10 @@ async function loadKnownDevices() {
 }
 
 // ── Live search suggestions ────────────────────────────────────────────────
-let _searchTimer = null;
-function onSearchInput(q) {
-  clearTimeout(_searchTimer);
-  const el = document.getElementById('search-suggestions');
-  if (!q.trim()) { el.innerHTML='<span style="color:var(--muted)">Type to search…</span>'; return; }
-  _searchTimer = setTimeout(async ()=>{
-    const vendor = document.getElementById('q-vendor').value;
-    try {
-      const r = await fetch(`${API}/api/search-devices?q=${encodeURIComponent(q)}&vendor=${vendor}`);
-      const d = await r.json();
-      if (!d.results?.length) { el.textContent='No matches.'; return; }
-      el.innerHTML = d.results.map(res=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;
-          padding:5px 7px;border-radius:4px;cursor:pointer;
-          border:1px solid ${d.best_match===res.key?'var(--accent)':'var(--border)'};
-          background:${d.best_match===res.key?'rgba(79,142,247,.08)':'var(--surface)'};margin-bottom:4px"
-          onclick="doCrawl('${res.key}')">
-          <div>
-            <span style="font-size:.78rem;font-weight:600">${res.model}</span>
-            ${d.best_match===res.key?'<span class="tag tag-green" style="margin-left:5px;font-size:.65rem">best</span>':''}
-            <div style="color:var(--muted);font-size:.7rem">${res.board_mm}mm · ${res.display}</div>
-          </div>
-          <span style="font-size:.7rem;color:var(--muted);min-width:28px;text-align:right">
-            ${res.score>0?res.score+'pt':''}
-          </span>
-        </div>`).join('');
-    } catch(e) { el.textContent='Search error.'; }
-  }, 280);
-}
+// Framework R3a: onSearchInput() was REMOVED with the Lookup UI (the user's
+// audit cut arbitrary device lookup entirely). doCrawl() below remains, but
+// is now only ever called with verified registry keys (known HAT list,
+// Deck archetype brains, Feature Module HATs).
 
 async function loadHeaderVariants() {
   const r = await fetch(API+'/api/header-variants');
@@ -2313,8 +2288,16 @@ async function loadHeaderVariants() {
 //  Crawl
 // ═══════════════════════════════════════════════════════
 async function doCrawl(key) {
-  const q=key||document.getElementById('q-input').value;
-  const vendor=document.getElementById('q-vendor').value;
+  // Framework R3a: only verified registry keys reach this function now
+  // (known HAT list, Deck archetype brains, Feature Module HATs) — the
+  // free-text Lookup that fed it arbitrary queries was cut.
+  // Pre-existing bug fixed minimally: the original read
+  // document.getElementById('q-vendor').value, but no #q-vendor element
+  // exists in the page, so EVERY doCrawl call threw before fetching.
+  // The vendor now defaults to 'waveshare' (all registry keys are
+  // Waveshare HATs), read null-safely if the element ever returns.
+  const q=key||'';
+  const vendor=(document.getElementById('q-vendor')||{}).value||'waveshare';
   statusBusy('Looking up '+q+'…');
   try {
     const r=await fetch(API+'/api/crawl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,vendor})});
