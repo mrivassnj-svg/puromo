@@ -1362,9 +1362,13 @@ function buildShell3D(geom) {
   });
 
   // Camera: angled from above-front so the open shell interior is clearly visible
-  controls.target.set(W/2, (lidY + pcbY)/2, H/2);
+  // controls exist only once the Placement tab has initialised the renderer;
+  // the pipeline / compute paths can build before that tab is ever opened.
   camera.position.set(W/2 - W*0.3, lidY + D*1.1, H/2 + H*1.8);
-  controls.update();
+  if (controls) {
+    controls.target.set(W/2, (lidY + pcbY)/2, H/2);
+    controls.update();
+  }
 
   draw2D(geom);
   updateDimKV(geom);
