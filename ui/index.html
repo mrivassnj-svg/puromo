@@ -597,6 +597,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
         <button class="btn btn-secondary" id="btn-report-images" onclick="generateReportImages()">🖼 Generate assembly images (Blender)</button>
         <button class="btn btn-secondary" onclick="refreshReportImagesStatus()">↻ Refresh status</button>
       </div>
+      <div id="design-id-line" style="font-size:.8rem;color:var(--muted);margin-top:8px"></div>
       <div id="report-images-status" style="font-size:.8rem;color:var(--muted);margin-top:8px">Assembly images: not generated yet for this session.</div>
     </div>
 
@@ -2441,13 +2442,10 @@ async function loadHeaderVariants() {
     const v=headerVariants[sel.value];
     if(!v) return;
     document.getElementById('header-info').textContent=`↕ ${v.above_mm}mm above · ${v.below_mm}mm below PCB`;
-    if(currentSpec){
-      currentSpec.gpio_header_variant=sel.value;
-      currentSpec.gpio_header_above_mm=v.above_mm;
-      currentSpec.gpio_header_below_mm=v.below_mm;
-      currentSpec.gpio_header_mated_gap_mm=v.mated_gap_mm;
-      document.getElementById('spec-json').value=JSON.stringify(currentSpec,null,2);
-    }
+    // Consolidation: the header is a choice, never written into
+    // the device spec. Geometry picks it up via effectiveSpec().
+    designState.headerVariant=sel.value;
+    if(currentSpec) computeGeometry();
   };
   sel.onchange();
 }
@@ -2471,8 +2469,7 @@ async function doCrawl(key) {
     const r=await fetch(API+'/api/crawl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,vendor})});
     const d=await r.json();
     if(d.status!=='ok') throw new Error(d.detail||'Error');
-    currentSpec=d.spec;
-    document.getElementById('spec-json').value=JSON.stringify(currentSpec,null,2);
+    adoptDevice(d.spec);
     statusOk('Spec loaded: '+currentSpec.model);
     updateDesignTruthNote();
     // Auto-compute geometry and update 3D viewer immediately
@@ -2484,7 +2481,7 @@ async function computeGeometry() {
   try { currentSpec=JSON.parse(document.getElementById('spec-json').value); } catch(e){ statusErr('Bad JSON'); return; }
   statusBusy('Computing geometry…');
   try {
-    const r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
+    const r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:effectiveSpec()})});
     const d=await r.json();
     if(d.status!=='ok') throw new Error(d.detail||'');
     currentGeom=d.geometry;
@@ -2492,6 +2489,7 @@ async function computeGeometry() {
     renderGeomTable(currentGeom);
     refreshOverlapGate();
     statusOk('Geometry computed');
+    refreshDesignId();
   } catch(e){ statusErr('Geometry error: '+e.message); }
 }
 
@@ -2522,19 +2520,16 @@ async function doPipeline() {
   if(!document.getElementById('spec-json').value.trim()) await doCrawl();
   try {
     currentSpec=JSON.parse(document.getElementById('spec-json').value);
-    // Inject header
+    // The header-bar select is a CHOICE (consolidation) — read
+    // into designState, never injected into the device spec.
     const hSel=document.getElementById('header-variant');
     if(hSel.value&&headerVariants[hSel.value]){
-      const hv=headerVariants[hSel.value];
-      currentSpec.gpio_header_variant=hSel.value;
-      currentSpec.gpio_header_above_mm=hv.above_mm;
-      currentSpec.gpio_header_below_mm=hv.below_mm;
-      currentSpec.gpio_header_mated_gap_mm=hv.mated_gap_mm;
+      designState.headerVariant=hSel.value;
     }
 
     // 1. Geometry
     statusBusy('Geometry…');
-    let r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
+    let r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:effectiveSpec()})});
     let d=await r.json(); if(d.status!=='ok') throw new Error('Geom: '+d.detail);
     currentGeom=d.geometry;
     buildShell3D(currentGeom);
@@ -2544,7 +2539,7 @@ async function doPipeline() {
     statusBusy('Build manifest…');
     const batRaw=document.getElementById('bat-size').value.split(',').map(Number);
     r=await fetch(API+'/api/generate-build',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({spec:currentSpec,geom:currentGeom,
+      body:JSON.stringify({spec:effectiveSpec(),geom:currentGeom,
         model_name:document.getElementById('model-name').value,
         include_battery:document.getElementById('inc-battery').checked,
         battery_size_mm:batRaw})});
@@ -2558,14 +2553,14 @@ async function doPipeline() {
     // 3. Specs
     statusBusy('Assembly specs…');
     r=await fetch(API+'/api/assemble-specs',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({spec:currentSpec,geom:currentGeom,build:currentBuild})});
+      body:JSON.stringify({spec:effectiveSpec(),geom:currentGeom,build:currentBuild})});
     d=await r.json(); if(d.status!=='ok') throw new Error('Specs: '+d.detail);
     currentSpecs=d.specs; currentMdFile=d.files.markdown; currentJsonFile=d.files.json;
     renderSpecs(currentSpecs);
 
     // 4. Pinout
     statusBusy('Pinout & wiring…');
-    r=await fetch(API+'/api/pinout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
+    r=await fetch(API+'/api/pinout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:effectiveSpec()})});
     d=await r.json(); if(d.status!=='ok') throw new Error('Pinout: '+d.detail);
     currentPinout=d.pinout;
     WIRE_COLOURS_JS=currentPinout.wire_colours||{};
@@ -2633,7 +2628,7 @@ async function generate3D() {
   statusBusy('Sending to Blender…');
   try {
     const r=await fetch(API+'/api/generate-3d',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({spec:currentSpec,model_name:document.getElementById('model-name').value})});
+      body:JSON.stringify({spec:effectiveSpec(),model_name:document.getElementById('model-name').value})});
     const d=await r.json();
     document.getElementById('log').textContent=JSON.stringify(d,null,2);
     statusOk('Blender job queued — polling for PCB STL…');
@@ -2798,7 +2793,7 @@ async function generateFirmware() {
     const r = await fetch(API+'/api/firmware/generate', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
-        spec: currentSpec,
+        spec: effectiveSpec(),
         model_name: document.getElementById('model-name').value
       })
     });
@@ -2914,7 +2909,7 @@ async function generateReport() {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         device_name:    deviceName,
-        spec:           currentSpec,
+        spec:           effectiveSpec(),
         geom:           currentGeom,
         pinout:         currentPinout,
         firmware_arch:  fwArch,
@@ -3078,7 +3073,7 @@ async function createPrintPackage() {
       stl_files:  stls.map(f=>`output/${f}`),
       printer_key: key,
       geom: currentGeom,
-      spec: currentSpec,
+      spec: effectiveSpec(),
     })
   });
   const d = await r.json();
@@ -3276,13 +3271,13 @@ function saveBuild() {
   const name = document.getElementById('save-slot-name').value.trim() ||
     currentSpec.model || 'Build';
   const saves = getSaves().filter(s=>s.name!==name);
+  // Saves v2 (consolidation): the raw device + the choices, and
+  // NOTHING derived — derived data is recomputed on load through
+  // the pipeline, so a save can never resurrect a stale design.
   saves.unshift({
     name,
     spec:  currentSpec,
-    geom:  currentGeom,
-    build: currentBuild,
-    specs: currentSpecs,
-    pinout: currentPinout,
+    choices: { ...designState, moduleIds: [...designState.moduleIds] },
     saved_at: new Date().toISOString(),
   });
   putSaves(saves);
@@ -3291,31 +3286,56 @@ function saveBuild() {
   statusOk(`Saved build: "${name}"`);
 }
 
-function loadSave(idx) {
+async function loadSave(idx) {
   const saves = getSaves();
   const s = saves[idx];
   if (!s) return;
-  currentSpec   = s.spec;
-  currentGeom   = s.geom;
-  currentBuild  = s.build;
-  currentSpecs  = s.specs;
-  currentPinout = s.pinout;
-  document.getElementById('spec-json').value = JSON.stringify(currentSpec||{}, null, 2);
-  if (currentGeom) {
-    buildShell3D(currentGeom);
-    renderGeomTable(currentGeom);
+  const legacy = !s.choices;
+  adoptDevice(s.spec || {});
+  // Choices are restored AFTER adoptDevice so they win over the
+  // device-seeded defaults — a loaded build IS its choices.
+  Object.assign(designState, legacy ? choicesFromLegacySave(s)
+                                    : { ...s.choices });
+  // Keep the header-bar control in step with the restored choice —
+  // the pipeline reads the choice from designState, and the select
+  // must not silently override it on the next run.
+  const hSel = document.getElementById('header-variant');
+  if (hSel && designState.headerVariant)
+    hSel.value = designState.headerVariant;
+  if (legacy) {
+    // Legacy save: its derived snapshots are restored for DISPLAY
+    // only (identity never reads them). Choices were reconstructed
+    // from the saved spec's folds — say so, and tell the user to
+    // re-run the pipeline to refresh the derived data.
+    currentGeom   = s.geom   || null;
+    currentBuild  = s.build  || null;
+    currentSpecs  = s.specs  || null;
+    currentPinout = s.pinout || null;
+    if (currentGeom) {
+      buildShell3D(currentGeom);
+      renderGeomTable(currentGeom);
+    }
+    if (currentSpecs) renderSpecs(currentSpecs);
+    if (currentPinout) {
+      WIRE_COLOURS_JS = currentPinout.wire_colours||{};
+      renderGPIOMap(currentPinout.gpio_map||[]);
+      renderPinoutTables(currentPinout);
+      renderPowerBudget(currentPinout.power_budget);
+      renderSafety(currentPinout.safety_checklist||[]);
+      buildWiringDiagram(currentPinout);
+      renderConflicts(currentPinout.conflicts||[]);
+    }
+    statusOk(`Loaded legacy build: "${s.name}" — choices reconstructed from the saved spec. Re-run the pipeline to refresh derived data.`);
+  } else {
+    currentGeom = currentBuild = currentSpecs = currentPinout = null;
+    statusOk(`Loaded build: "${s.name}" — rebuilding from the saved design…`);
+    try { await doPipeline(); }
+    catch (e) { statusErr('Rebuild after load failed: ' + e.message); }
   }
-  if (currentSpecs) renderSpecs(currentSpecs);
-  if (currentPinout) {
-    WIRE_COLOURS_JS = currentPinout.wire_colours||{};
-    renderGPIOMap(currentPinout.gpio_map||[]);
-    renderPinoutTables(currentPinout);
-    renderPowerBudget(currentPinout.power_budget);
-    renderSafety(currentPinout.safety_checklist||[]);
-    buildWiringDiagram(currentPinout);
-    renderConflicts(currentPinout.conflicts||[]);
-  }
-  statusOk(`Loaded build: "${s.name}"`);
+  refreshModules();
+  renderPowerSources();
+  updateDesignTruthNote();
+  refreshDesignId();
 }
 
 function deleteSave(idx) {
@@ -3352,11 +3372,13 @@ document.addEventListener('DOMContentLoaded', ()=>{ renderSavedBuilds(); });
 // ═══════════════════════════════════════════════════════════════
 //  FRAMEWORK (Requirements 1–5) — additive layer.
 //  Registries drive the Brain / Feature Modules / Power tabs; the
-//  design state below is folded into the EXISTING flow state
-//  (currentSpec + #spec-json) so the original pipeline, pinout,
-//  modular build and Blender paths consume it unchanged.
+//  CONSOLIDATION: the design is ONE object — the device spec
+//  (currentSpec, read-only after it arrives) plus the choices in
+//  designState. Nothing folds choices into the spec any more;
+//  effectiveSpec() derives the folded spec on demand, and the
+//  server derives identity from (device, choices) alone.
 // ═══════════════════════════════════════════════════════════════
-const designState = { brainId: null, moduleIds: [], powerSourceId: 'wired_usb', cameraZone: 'front_top' };
+const designState = { brainId: null, moduleIds: [], powerSourceId: 'wired_usb', cameraZone: 'front_top', headerVariant: null };
 let REGISTRIES = { brains: [], modules: [], power_sources: [] };
 let CAPABILITY = {};   // module_id -> {capable, reasons}
 let ALT_BRAINS  = {};  // module_id -> {brain_id, brain_name, preserves, selected_total}
@@ -3396,7 +3418,7 @@ function saveBuildFromOptions(){
   saveBuild();
   refreshBuildOptions();
 }
-function loadSaveFromOptions(i){ loadSave(i); refreshBuildOptions(); }
+async function loadSaveFromOptions(i){ await loadSave(i); refreshBuildOptions(); }
 function deleteSaveFromOptions(i){ deleteSave(i); refreshBuildOptions(); }
 function refreshBuildOptions(){
   const el = document.getElementById('bo-saved-list');
@@ -3459,21 +3481,16 @@ async function useBrainOnly(){
   if (!b) { statusErr('Choose a main board first.'); return; }
   designState.moduleIds = designState.moduleIds.filter(mid=>{ const m = moduleById(mid); return m && !m.hat; });
   const sel = document.getElementById('header-variant');
-  const hv = (typeof headerVariants !== 'undefined' && sel) ? headerVariants[sel.value] : null;
-  currentSpec = {
+  // The header is a CHOICE now — it is not baked into the device.
+  designState.headerVariant = sel ? sel.value : 'standard_11mm';
+  adoptDevice({
     model: b.name + ' (brain only)',
     vendor: 'raspberrypi',
     board_width_mm: b.board_w_mm,
     board_height_mm: b.board_h_mm,
     interface: 'GPIO',
     compatible_boards: [b.name],
-    gpio_header_variant: sel ? sel.value : 'standard_11mm',
-    gpio_header_above_mm: hv ? hv.above_mm : 8.5,
-    gpio_header_below_mm: hv ? hv.below_mm : 3.0,
-    gpio_header_mated_gap_mm: hv ? hv.mated_gap_mm : 11.5,
-  };
-  document.getElementById('spec-json').value = JSON.stringify(currentSpec, null, 2);
-  syncSpecFromDesign();
+  });
   await computeGeometry();
   document.getElementById('brain-status').textContent =
     `Brain-only design: the ${b.name} board itself is the device spec (${b.board_w_mm}×${b.board_h_mm} mm) — no HAT in the measurements. Geometry computed.`;
@@ -3482,28 +3499,74 @@ async function useBrainOnly(){
 }
 
 // ── Design state → existing flow state ──
-function syncSpecFromDesign(){
-  if (!currentSpec) return;
-  const keys = designState.moduleIds
+// The effective spec: the device (currentSpec, never mutated)
+// plus the choices, folded in HERE — the only place in the UI that
+// does this, mirroring the server's resolve_design(). Returns a
+// fresh object on every call; consumers send this, never the raw
+// device, when they need the design's working spec.
+function effectiveSpec(){
+  if (!currentSpec) return currentSpec;
+  const s = { ...currentSpec };
+  delete s.selected_modules; delete s.camera_zone;
+  delete s.include_battery; delete s.battery_size_mm;
+  delete s.brain_id;
+  if (designState.brainId) s.brain_id = designState.brainId;
+  const keys = [...new Set(designState.moduleIds
     .map(mid=>moduleById(mid))
     .filter(m=>m && m.pinout_module)
-    .map(m=>m.pinout_module);
-  currentSpec.selected_modules = [...new Set(keys)];
-  if (designState.moduleIds.includes('camera_module_3')) {
-    currentSpec.camera_zone = designState.cameraZone;
-  } else {
-    delete currentSpec.camera_zone;
-  }
+    .map(m=>m.pinout_module))].sort();
+  if (keys.length) s.selected_modules = keys;
+  if (designState.moduleIds.includes('camera_module_3'))
+    s.camera_zone = designState.cameraZone;
   const ps = powerById(designState.powerSourceId);
-  if (ps && ps.bay) {
-    currentSpec.include_battery = true;
-    currentSpec.battery_size_mm = ps.dims_mm;
-  } else {
-    delete currentSpec.include_battery;
-    delete currentSpec.battery_size_mm;
+  if (ps && ps.bay && ps.dims_mm) {
+    s.include_battery = true;
+    s.battery_size_mm = ps.dims_mm;
   }
-  document.getElementById('spec-json').value = JSON.stringify(currentSpec, null, 2);
+  const hv = designState.headerVariant
+    ? headerVariants[designState.headerVariant] : null;
+  if (hv) {
+    s.gpio_header_variant    = designState.headerVariant;
+    s.gpio_header_above_mm   = hv.above_mm;
+    s.gpio_header_below_mm   = hv.below_mm;
+    s.gpio_header_mated_gap_mm = hv.mated_gap_mm;
+  }
+  return s;
+}
+
+// Adopt a freshly arrived device spec (crawl, brain-only, custom):
+// it becomes the read-only device, the textarea shows IT (never a
+// folded hybrid), and the header choice seeds from its variant.
+function adoptDevice(spec){
+  currentSpec = spec;
+  document.getElementById('spec-json').value =
+    JSON.stringify(currentSpec, null, 2);
+  if (spec && spec.gpio_header_variant)
+    designState.headerVariant = spec.gpio_header_variant;
   updateDesignTruthNote();
+}
+
+// Reconstruct choices for a LEGACY save (pre-consolidation saves
+// stored only the folded spec — the choices were never saved).
+// Everything here is read back out of that fold; nothing invented.
+function choicesFromLegacySave(s){
+  const spec = (s && s.spec) || {};
+  const c = { brainId: spec.brain_id || null, moduleIds: [],
+              powerSourceId: 'wired_usb',
+              cameraZone: spec.camera_zone || 'front_top',
+              headerVariant: spec.gpio_header_variant || null };
+  const keys = spec.selected_modules || [];
+  c.moduleIds = [...new Set(keys
+    .map(k=>REGISTRIES.modules.find(m=>m.pinout_module===k))
+    .filter(Boolean).map(m=>m.id))];
+  if (spec.camera_zone && !c.moduleIds.includes('camera_module_3'))
+    c.moduleIds.push('camera_module_3');
+  if (spec.include_battery && spec.battery_size_mm) {
+    const ps = REGISTRIES.power_sources.find(p=>p.bay &&
+      JSON.stringify(p.dims_mm)===JSON.stringify(spec.battery_size_mm));
+    if (ps) c.powerSourceId = ps.id;
+  }
+  return c;
 }
 
 // ── GPIO Header tab (R3c) ──
@@ -3604,12 +3667,10 @@ async function addModule(id){
     designState.moduleIds = designState.moduleIds.filter(mid=>{ const mm = moduleById(mid); return !(mm && mm.hat); });
     if (!designState.moduleIds.includes(id)) designState.moduleIds.push(id);
     await doCrawl(m.spec_key);
-    syncSpecFromDesign();
     await computeGeometry();
     statusOk('HAT loaded: ' + m.name + ' — it is in the measurements from this first compute.');
   } else {
     if (!designState.moduleIds.includes(id)) designState.moduleIds.push(id);
-    syncSpecFromDesign();
     if (currentSpec) await computeGeometry();
     statusOk('Module added: ' + m.name);
   }
@@ -3619,7 +3680,6 @@ async function addModule(id){
 
 async function removeModule(id){
   designState.moduleIds = designState.moduleIds.filter(x=>x!==id);
-  syncSpecFromDesign();
   if (currentSpec) await computeGeometry();
   statusOk('Module removed: ' + (moduleById(id)?.name || id));
   refreshModules();
@@ -3629,7 +3689,6 @@ async function removeModule(id){
 // ── Camera placement (R2a) ──
 async function setCameraZone(zone){
   designState.cameraZone = zone;
-  syncSpecFromDesign();
   if (currentSpec) await computeGeometry();
   updateCameraStatus();
 }
@@ -3680,7 +3739,6 @@ async function selectPowerSource(id){
   } else {
     if (inc) inc.checked = false;
   }
-  syncSpecFromDesign();
   if (currentSpec) await computeGeometry();
   renderPowerSources();
   statusOk(p && p.bay ? `Power source: ${p.name} — battery bay flow set (${p.dims_mm.join('×')} mm).` : 'Power source: wired — wire to outlet (USB). No battery required.');
@@ -3694,7 +3752,7 @@ async function runPinoutVerify(silent){
   if (!statusEl) return;
   if (!currentSpec) { if (!silent) statusErr('No spec yet — load a device or run the pipeline first.'); return; }
   try {
-    const r = await fetch(API+'/api/pinout/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ spec: currentSpec }) });
+    const r = await fetch(API+'/api/pinout/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ spec: effectiveSpec() }) });
     const d = await r.json();
     if (d.status !== 'ok') throw new Error(d.detail || 'verify failed');
     if (d.all_pass) {
@@ -3787,7 +3845,6 @@ async function applyArchetypeMapping(deck){
     applied.push('power: ' + (p ? p.name : map.power));
   }
   if (applied.length) {
-    syncSpecFromDesign();
     if (currentSpec) await computeGeometry();
     refreshModules();
     renderPowerSources();
@@ -3805,10 +3862,33 @@ function currentSelection(){
     power_source_id: designState.powerSourceId,
     camera_zone: designState.moduleIds.includes('camera_module_3')
       ? designState.cameraZone : null,
+    header_variant: designState.headerVariant,
     has_hat: designState.moduleIds.some(id => {
                const m = moduleById(id); return m && m.hat;
              }) || /hat/i.test((currentSpec && currentSpec.model) || ''),
   };
+}
+
+// The design's identity, from the server's single derivation —
+// shown in the Report tab so a design change (and whether images
+// exist for THIS design) is visible before any PDF is generated.
+async function refreshDesignId(){
+  const el = document.getElementById('design-id-line');
+  if (!el || !currentSpec) return;
+  try {
+    const r = await fetch(API + '/api/design-id', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ spec: effectiveSpec(),
+                             selection: currentSelection() }),
+    });
+    const d = await r.json();
+    if (!d.design_hash) return;
+    el.innerHTML = 'Design: <b>' + d.design_hash + '</b> — ' +
+      (d.images_present
+        ? 'assembly images ready for THIS design (' +
+          d.images_present + ' on disk).'
+        : 'no assembly images for this design yet.');
+  } catch (e) { /* identity display is best-effort */ }
 }
 
 // ── Report assembly images (R6b) ──
@@ -3831,7 +3911,7 @@ async function generateReportImages(){
   try {
     const r = await fetch(API + '/api/report-images', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ spec: currentSpec, geom: currentGeom,
+      body: JSON.stringify({ spec: effectiveSpec(), geom: currentGeom,
                              specs: currentSpecs,
                              selection: currentSelection(),
                              force: true }),
