@@ -2010,6 +2010,121 @@ function showDeckDetail(id, el) {
   if (el) { el.style.borderBottomColor = 'var(--accent)'; el.style.color = 'var(--accent)'; }
 }
 
+
+// ── BOM spotlight (Requirement 9) ───────────────────────────────────────────
+// Selecting a BOM item highlights its exact replica in the inventory on the
+// same screen: every other component fades, the matched one gets an accent
+// plate and a label carrying the BOM item's own text. Matching is by name
+// tokens against the rendered components. A part with no replica (concept
+// only, or wired power with no bay component) gets an honest note instead —
+// nothing is invented for it.
+let bomSpotlight = null;   // {deckId, rowIndex, part, invIndex}
+function bomTokens(s) {
+  return new Set((s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\s+/).filter(t => t.length >= 2));
+}
+function bomMatchIndex(part) {
+  // Generic words never claim a match on their own ("GPS module" must not
+  // spotlight the camera just because both names contain "module"): a
+  // match needs two shared specific tokens, or one strong token (len >= 4).
+  const GENERIC = new Set(['module', 'modules', 'card', 'with', 'the', 'for', 'and', 'kit', 'board', 'pack']);
+  const pt = bomTokens(part);
+  let best = -1, bestScore = 0, bestStrong = false;
+  deckInventoryItems.forEach((it, idx) => {
+    const nt = bomTokens(it.name);
+    let score = 0, strong = false;
+    pt.forEach(t => {
+      if (nt.has(t) && !GENERIC.has(t)) { score++; if (t.length >= 4) strong = true; }
+    });
+    if (score > bestScore) { bestScore = score; best = idx; bestStrong = strong; }
+  });
+  return (bestScore >= 2 || (bestScore === 1 && bestStrong)) ? best : -1;
+}
+function makeLabelSprite(text) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 112;
+  const g = cv.getContext('2d');
+  g.fillStyle = 'rgba(6,10,16,.85)';
+  g.beginPath();
+  if (g.roundRect) g.roundRect(6, 6, 500, 100, 18); else g.rect(6, 6, 500, 100);
+  g.fill();
+  g.font = '600 40px system-ui, sans-serif'; g.fillStyle = '#ffd166';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 256, 58, 480);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false}));
+  const w = Math.max(34, text.length * 2.6);
+  sp.scale.set(w, w * 112 / 512, 1);
+  return sp;
+}
+function bomSpotlightNote(html) {
+  let el = document.getElementById('bom-spotlight-note');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'bom-spotlight-note';
+    el.style.cssText = 'margin-top:10px;padding:8px 10px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.25);border-radius:6px;font-size:.74rem;line-height:1.5';
+    document.getElementById('dd-bom').appendChild(el);
+  }
+  el.innerHTML = html;
+  el.style.display = html ? '' : 'none';
+}
+function spotlightBom(deckId, i) {
+  const deck = CYBERDECK_BUILDS.find(d => d.id === deckId);
+  if (!deck) return;
+  if (bomSpotlight && bomSpotlight.deckId === deckId && bomSpotlight.rowIndex === i) {
+    bomSpotlight = null;                       // second click resets the view
+  } else {
+    bomSpotlight = { deckId, rowIndex: i, part: deck.bom[i].part, invIndex: -1 };
+  }
+  renderBomChecklist(deck);
+  applySpotlightVisuals();
+}
+function applySpotlightVisuals() {
+  if (!deckScene) { bomSpotlightNote(''); return; }
+  // Remove previous spotlight extras (plate + BOM-text label)
+  deckScene.children.filter(c => c.userData.spotlightExtra)
+    .forEach(o => deckScene.remove(o));
+  // Restore every component first
+  deckScene.children.forEach(c => {
+    if (!c.userData.deckObj || !c.material) return;
+    c.material.opacity = 1;
+    c.material.transparent = !!c.isSprite;
+    c.material.needsUpdate = true;
+  });
+  if (!bomSpotlight) { bomSpotlightNote(''); return; }
+  const idx = bomMatchIndex(bomSpotlight.part);
+  bomSpotlight.invIndex = idx;
+  if (idx < 0) {
+    const mapped = (ARCHETYPE_MAP[bomSpotlight.deckId] || {parts: []}).parts
+      .includes(bomSpotlight.part);
+    bomSpotlightNote(mapped
+      ? `“${bomSpotlight.part}” is part of your design, but it has no rendered component to show (for example wired power has no bay part).`
+      : `“${bomSpotlight.part}” is <b>concept only</b> — it is not in the verified registry, so there is no exact replica to render. It never enters the design, the renders, or the report.`);
+    return;
+  }
+  const it = deckInventoryItems[idx];
+  deckScene.children.forEach(c => {
+    if (!c.userData.deckObj || !c.material) return;
+    if (c.userData.invIndex !== idx) {
+      c.material.transparent = true;
+      c.material.opacity = 0.13;
+      c.material.needsUpdate = true;
+    }
+  });
+  const deck = CYBERDECK_BUILDS.find(d => d.id === bomSpotlight.deckId);
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(it.w + 9, 0.5, it.d + 9),
+    new THREE.MeshPhongMaterial({color: new THREE.Color(deck ? deck.color : '#4f8ef7'), shininess: 30}));
+  plate.position.set(it.cx || 0, 0.25, 0);
+  plate.userData.spotlightExtra = true;
+  deckScene.add(plate);
+  const sp = makeLabelSprite(bomSpotlight.part.length > 34
+    ? bomSpotlight.part.slice(0, 33) + '…' : bomSpotlight.part);
+  sp.position.set(it.cx || 0, (it.h || 2) + 27, 0);
+  sp.userData.spotlightExtra = true;
+  deckScene.add(sp);
+  bomSpotlightNote(`Showing the exact replica of “${bomSpotlight.part}” — ${it.name} (${it.w}×${it.d} mm). Everything else is faded; click Reset view to restore.`);
+}
+
 // ── BOM checklist ─────────────────────────────────────────────────────────────
 let _bomChecked = {};
 function renderBomChecklist(deck) {
@@ -2017,7 +2132,7 @@ function renderBomChecklist(deck) {
   const checked = _bomChecked[deck.id];
   const el = document.getElementById('deck-bom-list');
   el.innerHTML = deck.bom.map((r, i) => `
-    <label style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer">
+    <label data-bom-row="${i}" style="display:flex;align-items:flex-start;gap:9px;padding:7px 6px;border-bottom:1px solid var(--border);cursor:pointer;${(bomSpotlight && bomSpotlight.deckId === deck.id && bomSpotlight.rowIndex === i) ? `background:rgba(79,142,247,.13);border-left:3px solid ${deck.color}` : 'border-left:3px solid transparent'}">
       <input type="checkbox" ${checked[i] ? 'checked' : ''}
         onchange="_bomChecked['${deck.id}'][${i}]=this.checked; updateBomProgress('${deck.id}')"
         style="width:auto;margin-top:2px;flex-shrink:0;accent-color:${deck.color}"/>
@@ -2027,6 +2142,8 @@ function renderBomChecklist(deck) {
           ? '<span class="tag tag-green" title="This part is in the verified registry — applying this archetype folds it into your actual design">→ maps into your design</span>'
           : '<span class="tag" title="Concept part — not in the verified registry; it never enters your design, the renders, or the report">concept only</span>'}</div>
         <div style="font-size:.7rem;color:var(--muted)">${r.qty !== 1 ? 'Qty: '+r.qty+' · ' : ''}${r.notes}</div>
+        <button class="btn btn-secondary" style="font-size:.68rem;padding:2px 9px;margin-top:5px"
+          onclick="event.preventDefault();event.stopPropagation();spotlightBom('${deck.id}',${i})">${(bomSpotlight && bomSpotlight.deckId === deck.id && bomSpotlight.rowIndex === i) ? '✕ Reset view' : '👁 Show in 3D'}</button>
       </div>
     </label>`).join('');
   updateBomProgress(deck.id);
@@ -2176,7 +2293,8 @@ function buildDeckInventory() {
     if (emissive) m.emissive = new THREE.Color(emissive);
     return m;
   }
-  function add(mesh) { mesh.userData.deckObj = true; deckScene.add(mesh); return mesh; }
+  let curInvIndex = -1;
+  function add(mesh) { mesh.userData.deckObj = true; mesh.userData.invIndex = curInvIndex; deckScene.add(mesh); return mesh; }
   function label(text, x, y, z) {
     const cv = document.createElement('canvas'); cv.width = 512; cv.height = 112;
     const g = cv.getContext('2d');
@@ -2337,8 +2455,10 @@ function buildDeckInventory() {
   const GAP = 16;
   const totalW = items.reduce((s, it) => s + it.w, 0) + GAP * Math.max(0, items.length - 1);
   let x = -totalW / 2;
-  items.forEach(it => {
+  items.forEach((it, idx) => {
+    curInvIndex = idx;
     const cx = x + it.w / 2;
+    it.cx = cx;
     if (it.replica === 'hat') drawHat(it, cx);
     else if (it.replica === 'zero') drawZero(it, cx);
     else if (it.replica === 'brain') drawBrain(it, cx);
@@ -2360,6 +2480,7 @@ function buildDeckInventory() {
     x += it.w + GAP;
   });
   deckInventoryItems = items;
+  curInvIndex = -1;
 
   // Frame the whole spread (controls exist only once the deck renderer
   // has initialised — same guard class as the pipeline's renderer fix)
@@ -2380,10 +2501,12 @@ function buildDeckInventory() {
       ' · concept-only BOM lines are not rendered'
     : 'Inventory — no components in the design yet: pick a main board to begin';
   lbl.style.color = 'rgba(255,255,255,.55)';
+  if (bomSpotlight && bomSpotlight.deckId === activeDeckId) applySpotlightVisuals();
 }
 
 function selectDeck(id) {
   activeDeckId = id;
+  bomSpotlight = null;
   const deck = CYBERDECK_BUILDS.find(d => d.id === id);
   if (!deck) return;
 
