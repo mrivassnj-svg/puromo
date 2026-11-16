@@ -2,7 +2,7 @@
 
 > **Web-crawler → dimension math → modular PCB shell → Blender STL → firmware → PDF report → 3D print server**
 
-Puromo is a full-stack handheld device design and manufacturing system. Point it at a PCB (Waveshare LCD HAT, Adafruit, SparkFun, or your own custom dimensions) and it builds everything you need to design, print, and program a custom handheld enclosure.
+Puromo is a full-stack handheld device design system. Point it at a PCB and it computes an exact shell, a modular build, firmware, a PDF report, and a printer package — in that order, as a 7-stage pipeline in the web UI.
 
 ---
 
@@ -10,15 +10,27 @@ Puromo is a full-stack handheld device design and manufacturing system. Point it
 
 | Layer | What it does |
 |-------|-------------|
-| 🔍 **Web Crawler** | Scrapes Waveshare / Adafruit / SparkFun / Arduino / RPi for exact PCB specs. Hardcoded exact math for 3 Waveshare LCD HATs. |
-| 📐 **Dimension Engine** | Computes exact shell W×H×D from board + GPIO header variant. Pixel pitch (0.0975 mm), PPI (261.09), display cutout, standoffs, snap-fits, ribs. |
-| 🧊 **Blender Generator** | Headless Blender (`--background --python`) produces `_bottom.stl`, `_lid.stl`, `_shell.blend` with Boolean cuts for display, buttons, joystick, ports. |
-| 🗂 **Modular Entities** | `TopCase`, `BottomCase`, `BatteryTray`, `PortModule`, `ButtonCap`, `JoystickRing`, `GripPanel`, `StandoffPillar` — all parameterised from geometry. |
-| 🔌 **Pinout Engine** | Full RPi 40-pin GPIO map. 11 module pinout definitions (ST7789 LCD HAT, SSD1306 OLED, buttons, MCP3008 ADC joystick, LiPo+TP4056, USB-C, HDMI, audio, MicroSD, NeoPixel, MPU-6050). Conflict detection + power budget. |
-| ⚡ **Firmware Generator** | 15 real Python files: `main.py`, `config.py`, `event_bus.py`, 7 drivers, 2 app files, README. 11-phase boot sequence, cooperative asyncio scheduler, typed EventBus. |
-| 📄 **PDF Report** | 10-section professional PDF: cover page, architecture, shell dimensions, display math, GPIO visual map, wiring tables, firmware boot sequence, assembly guide, print settings, safety checklist, sign-off block. |
-| 🖨 **Print Server** | 7-printer catalogue (FlashForge Adventurer 5M + 5M Pro, Bambu X1C, Prusa MK4, Creality K1, OctoPrint, Moonraker). ZIP package with STLs + OrcaSlicer config + FlashPrint G-code + transfer README. Upload & start print over LAN or FlashCloud. |
-| 🌐 **Web UI** | Dark SPA with 10 tabs: 3D View (Three.js, rotate/zoom/pan/explode/wireframe/x-ray), Device Spec, Geometry, Pinout, Wiring SVG, Assembly, Firmware code viewer, Report, Print, Files. Per-part colour picker. Device save-slots (localStorage). Custom PCB entry form. Blender log live-polling. |
+| 🔍 **Web Crawler** | Looks up device specs. Vendor URL patterns exist for Waveshare / Adafruit / SparkFun / Arduino / Raspberry Pi, with regex extraction on a live crawl and a zero/fallback spec (65×30 mm) when nothing is found. **Exact hardcoded math exists for only 3 Waveshare LCD HAT keys** (see below); every other vendor/board relies on crawled, cached, or manually entered data. |
+| 📐 **Dimension Engine** | `DimensionMath.compute()` is the **single source of truth for geometry**. It emits one geometry dict (shell W×H×D, wall/floor/lid/board thickness, standoffs, header geometry + position, display cutout, bosses, apertures, ribs, snap-fits, depth breakdown, and fit/tolerance warnings) that both the Three.js viewer and the Blender generator consume — neither recomputes dimensions itself. |
+| 🧊 **Blender Generator** | Headless Blender (`--background --python … --geometry <backend geometry JSON>`) produces `_bottom.stl`, `_lid.stl`, `_pcb.stl`, `_shell.blend`. If Blender is not installed, stage 4 is marked **skipped**, not failed. |
+| 🗂 **Modular Entities** | `TopCase`, `BottomCase`, `BatteryTray`, `PortModule`, `ButtonCap`, `JoystickRing`, `GripPanel`, `StandoffPillar` — parameterised from geometry. A build is **12 entities without a battery bay, 13 with one** (for the 1.3″ HAT: TopCase + BottomCase + 3 ButtonCaps + JoystickRing + 2 GripPanels + 4 StandoffPillars, + BatteryTray). |
+| 🔌 **Pinout Engine** | Full RPi 40-pin GPIO map. 11 module pinout definitions (ST7789 LCD HAT, SSD1306 OLED, tactile buttons, MCP3008 ADC joystick, LiPo+TP4056, USB-C, micro-HDMI, audio, MicroSD, NeoPixel, MPU-6050). Conflict detection + power budget. Note: shared SPI bus pins (GPIO10 MOSI / GPIO11 SCLK, shared by the LCD and the MCP3008 joystick) are currently reported as conflicts by the engine — the UI surfaces them as-is. |
+| ⚡ **Firmware Generator** | Emits **15 manifest files: 14 Python files + `README_FIRMWARE.md`** (`main.py`, `config.py`, `event_bus.py`, 7 drivers — display_st7789, backlight, buttons, joystick, battery, imu_mpu6050, audio — `app/app.py`, `app/state_machine.py`, and the two `__init__.py` files), **plus `firmware_manifest.json` written separately = 16 files on disk**. 11-phase boot sequence, cooperative asyncio scheduler, typed EventBus with **11 event types**. No SSD1306 or NeoPixel driver file is generated. |
+| 📄 **PDF Report** | Cover page + table of contents + **10 numbered sections**: architecture, shell dimensions, display math, GPIO visual map, wiring, firmware boot sequence, assembly guide, print settings, safety checklist, sign-off block. |
+| 🖨 **Print Server** | 7-printer catalogue (FlashForge Adventurer 5M + 5M Pro, Bambu X1C, Prusa MK4, Creality K1, OctoPrint, Moonraker). One **Package for printer** action builds a ZIP with the STLs found in `output/` + slicer profile + OrcaSlicer machine config + transfer README. Upload/start-print are separate, manual actions in stage 7 — Run Pipeline never starts a printer. |
+| 🌐 **Web UI** | Dark SPA organised as a **7-stage stepper** (not tabs — see Usage). Plain rotate/zoom/pan Three.js preview driven entirely by backend geometry. **Server-side saved builds** (JSON in `data/saved_builds/`). |
+
+### Exact math: which boards?
+
+Exact hardcoded specs/math exist **only** for these 3 keys in `WAVESHARE_LCD_HATS`:
+
+| Key | Model |
+|-----|-------|
+| `1.3inch_lcd_hat` | Waveshare 1.3inch LCD HAT (240×240) |
+| `2inch_lcd_hat` | Waveshare 2inch LCD HAT (240×320) |
+| `240x240_1.3_hat` | Waveshare 240x240 1.3inch HAT (overlaps the first 1.3″ entry) |
+
+Everything else — other Waveshare products, Adafruit, SparkFun, Arduino, Raspberry Pi boards, and custom PCBs — relies on **crawled regex extraction, the local JSON cache, manual entry, or the 65×30 mm fallback spec**. Treat those dimensions as unverified until you check them.
 
 ---
 
@@ -26,19 +38,19 @@ Puromo is a full-stack handheld device design and manufacturing system. Point it
 
 ```
 puromo/
-├── main.py                     FastAPI backend — 33 routes
+├── main.py                     FastAPI backend — 34 route decorators (33 under /api/ + GET /)
 ├── requirements.txt
-├── start.sh                    One-command install + launch
+├── start.sh                    One-command install + launch (uses .venv when system pip is PEP 668 externally-managed)
 │
 ├── crawler/
-│   └── device_crawler.py       DeviceCrawler, WAVESHARE_LCD_HATS (3),
-│                               GPIO_HEADER_VARIANTS (8), COMMON_COMPONENT_HEIGHTS (19)
+│   └── device_crawler.py       DeviceCrawler, WAVESHARE_LCD_HATS (3 exact keys),
+│                               GPIO_HEADER_VARIANTS (8), COMMON_COMPONENT_HEIGHTS (19), VENDOR_PATTERNS (5 vendors)
 │
 ├── parser/
-│   └── dimension_math.py       DimensionMath → ShellGeometry (exact W×H×D)
+│   └── dimension_math.py       DimensionMath → ShellGeometry (the geometry single source of truth)
 │
 ├── blender_gen/
-│   └── blender_shell_gen.py    Headless Blender → bottom.stl + lid.stl + shell.blend
+│   └── blender_shell_gen.py    Headless Blender → bottom/lid/pcb STL + shell.blend; consumes --geometry JSON
 │
 ├── modular/
 │   └── modular_entities.py     TopCase, BottomCase, BatteryTray, PortModule, ButtonCap…
@@ -48,23 +60,27 @@ puromo/
 │   └── pinout_engine.py        40-pin GPIO map, 11 modules, conflict detection, power budget
 │
 ├── firmware/
-│   ├── firmware_engine.py      BOOT_PHASES (11), EVENT_TYPES (16), SCHEDULER_DESIGN
-│   └── firmware_generator.py   Generates 15 real Python firmware files
+│   ├── firmware_engine.py      BOOT_PHASES (11), EVENT_TYPES (11), SCHEDULER_DESIGN
+│   └── firmware_generator.py   Generates 14 Python files + README_FIRMWARE.md (+ firmware_manifest.json)
 │
 ├── report/
-│   └── pdf_report.py           PDFReportGenerator — 10-section professional PDF
+│   └── pdf_report.py           PDFReportGenerator — cover + TOC + 10 numbered sections
 │
 ├── printer/
-│   └── printer_server.py       PrintPackager + PrinterClient (FlashForge/OctoPrint/Moonraker)
+│   └── printer_server.py       PrintPackager + PrinterClient (FlashForge/OctoPrint/Moonraker…)
 │
 ├── ui/
-│   └── index.html              Full SPA — Three.js 3D viewer, 10 tabs, all features
+│   └── index.html              SPA — 7-stage stepper, Three.js preview (backend geometry only)
 │
 ├── data/
-│   └── devices/                JSON cache for crawled specs
+│   ├── devices/                JSON cache for crawled specs (created by start.sh)
+│   ├── saved_builds/           Server-side saved builds, one JSON per build (created by start.sh / the API)
+│   └── templates/              Created by start.sh (currently unused)
 │
-└── output/                     All generated files land here
-    ├── <model>/                Firmware tree (15 .py files)
+└── output/                     Generated files land here
+    ├── waveshare_1_3_lcd_hat/  Sample firmware tree: 14 .py files, 16 files total
+    ├── test_handheld_print_package/  Sample print-package contents
+    ├── <model>_geometry.json   Backend geometry JSON passed to Blender
     ├── <model>_design_report.pdf
     ├── <model>_print_package.zip
     └── <model>_blender.log
@@ -75,76 +91,58 @@ puromo/
 ## 🚀 Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/mrivassnj-svg/puromo.git
 cd puromo
-
-# Install & launch (Python 3.9+)
 chmod +x start.sh
-./start.sh
-
-# Open browser
-open http://localhost:8765
+./start.sh            # installs deps (into .venv if system pip is externally managed) and launches
+# Open http://localhost:8765
 ```
 
 **Optional — Blender for STL generation:**
 ```bash
-# Install Blender 3.x+ and add to PATH
-# https://www.blender.org/download/
-blender --version   # verify
+blender --version   # verify Blender 3.x+ is on PATH; without it stage 4 is skipped
 ```
 
 ---
 
-## 🖥 Usage
+## 🖥 Usage — the 7-stage stepper
 
-### 1. Select a device
-- Click a known **Waveshare LCD HAT** in the sidebar, or
-- Type any model name and hit **Crawl / Lookup**, or
-- Expand **Custom PCB Entry** and type your board dimensions manually
+The UI is a stepper, one stage per pipeline step. Each stage shows its inputs, a status (**not run / running / done / failed / skipped**), its outputs, and a **re-run** button. **▶ Run Pipeline** (sidebar) runs all 7 stages in order, stops on the first failure with that stage's error, and continues past a skipped stage 4.
 
-### 2. Configure the build
-- Choose **GPIO Header Variant** (standard 11mm, low-profile, tall, pogo, ribbon…)
-- Set a **Model Name**
-- Optionally enable **Battery Bay**
+| Stage | Inputs | Outputs / panels |
+|-------|--------|------------------|
+| **1. Crawl / Lookup** | A known Waveshare HAT (sidebar), a search query + vendor, or the Custom PCB form | Device spec JSON (Device Spec panel) |
+| **2. Dimensions** | Device spec | Backend ShellGeometry; **3D preview + Geometry table + 2D top-down preview**; **fit/tolerance warnings** from the dimension engine |
+| **3. Modular Build** | Spec + geometry | Build manifest (**12 entities, 13 with battery**); **Assembly panel with BOM + filament estimate**; **Pinout + Wiring panels** (placed here because they describe how the modular build is wired and assembled) |
+| **4. Blender STL** | Spec + backend geometry JSON | STL/.blend files; **Files panel + Blender log**. *Skipped: Blender not found* when Blender is absent |
+| **5. Firmware** | Spec | Firmware tree viewer + architecture (boot phases, driver order, scheduler, EventBus) |
+| **6. PDF Report** | Spec + geometry + pinout + assembly specs | PDF design report |
+| **7. Print** | STLs in `output/` + printer choice | **Package for printer** (single action → ZIP). Printer connect / upload / start-print are separate manual actions here. **Saved Builds** also live in this stage |
 
-### 3. Run Pipeline
-Click **▶ Run Pipeline** — the system executes all 4 stages in sequence:
-1. Dimension math → shell geometry
-2. Modular build manifest (12–15 entities)
-3. Assembly specs + BOM
-4. Pinout + wiring diagram
+Pinout conflicts and the power budget are also shown in an alert area above the stages, so you don't have to open stage 3 to see them.
 
-### 4. Explore results
-| Tab | Contents |
-|-----|---------|
-| **3D View** | Live WebGL shell with display cutout, PCB, buttons, joystick, mounting bosses. Explode, wireframe, x-ray, per-part colour picker. |
-| **Geometry** | Shell envelope table + 2D top-down canvas preview |
-| **Pinout** | 40-pin GPIO colour map, per-module wiring tables, conflicts, power budget, safety checklist |
-| **Wiring** | Interactive SVG wiring diagram with Bezier wires from RPi header to each module |
-| **Assembly** | Hardware BOM, filament estimate, step-by-step assembly guide, tolerances |
-| **Firmware** | Generate 15 Python files. View any file with syntax highlighting. Download as ZIP. |
-| **Report** | Generate a professional PDF design report (cover page → sign-off block) |
-| **Print** | Select printer, test connection, create STL+profile ZIP, upload & start print |
-| **Files** | Browse all generated output files, live Blender log polling |
+### Save your build
+In **stage 7 → Saved Builds**: name the build and save it. Builds are stored **on the server** as JSON in `data/saved_builds/`, so they can be loaded from any browser or device that can reach this server. (This replaces the old `localStorage` saves, which only ever worked in the one browser that saved them.)
 
-### 5. Save your build
-In the **Files** tab → **Saved Builds**: name your build and save it to localStorage. Load it back instantly from any device on the same browser.
+### Removed features
+Removed because they did not serve the pipeline (or duplicated geometry): the **Deck / Groq cyberdeck archetypes** (9 hardcoded builds with their own BOM/wiring, unrelated to the backend), the **per-part colour picker**, the **explode toggle**, the **wireframe/x-ray render modes**, and the **Bezier curves** in the wiring diagram (now straight lines). The 3D preview keeps rotate/zoom/pan, with the lid shown at a fixed offset so the PCB layer stays visible.
 
 ---
 
 ## 🔌 Supported GPIO Header Variants
 
+Values are `GPIO_HEADER_VARIANTS` in `crawler/device_crawler.py` (`above_mm` = header housing above the HAT PCB, `mated_gap_mm` = board-to-board gap):
+
 | Key | Label | Above PCB | Mated gap |
 |-----|-------|-----------|-----------|
-| `standard_11mm` | Standard 2.54mm (11mm) | 11.0 mm | 8.5 mm |
-| `tall_15mm` | Tall header (15mm) | 15.0 mm | 12.5 mm |
-| `low_profile_5mm` | Low-profile (5mm) | 5.0 mm | 2.5 mm |
-| `low_profile_8mm` | Low-profile (8mm) | 8.0 mm | 5.5 mm |
-| `stacking_20mm` | Stacking header (20mm) | 20.0 mm | 17.5 mm |
-| `soldered_direct` | Direct solder (no header) | 1.5 mm | 0.0 mm |
-| `gpio_ribbon` | GPIO ribbon cable | 2.0 mm | 2.0 mm |
-| `pogo_pin` | Pogo-pin connector | 3.0 mm | 1.5 mm |
+| `standard_11mm` | Standard 11mm (RPi HAT default) | 8.5 mm | 11.5 mm |
+| `tall_15mm` | Tall 15mm stacking header | 12.0 mm | 15.0 mm |
+| `low_profile_5mm` | Low-profile 5mm header | 2.5 mm | 5.5 mm |
+| `low_profile_8mm` | Low-profile 8mm header | 5.5 mm | 8.5 mm |
+| `stacking_20mm` | Stacking 20mm header | 17.0 mm | 20.0 mm |
+| `soldered_direct` | Soldered direct (no header) | 0.0 mm | 1.0 mm |
+| `gpio_ribbon` | GPIO ribbon cable + 11mm standoffs | 2.5 mm | 11.5 mm |
+| `pogo_pin` | Pogo-pin connector | 3.0 mm | 4.0 mm |
 
 ---
 
@@ -164,44 +162,40 @@ In the **Files** tab → **Saved Builds**: name your build and save it to localS
 
 ## 📐 Waveshare Display Math
 
-For the 1.3" HAT (240×240 ST7789):
+For the 1.3″ HAT (240×240 ST7789). **PPI has exactly one definition in this project** — the diagonal formula used by `DimensionMath`:
 
 ```
 pixel_pitch = display_active_width / resolution_w
             = 23.4 mm / 240 px = 0.0975 mm/px
 
-PPI = 25.4 / pixel_pitch = 25.4 / 0.0975 = 260.5 ≈ 261.09 PPI
-
-shell_depth = floor_thickness (2.5)
-            + pcb_thickness (1.6)
-            + gpio_header_mated_gap (8.5 for standard)
-            + display_clearance (1.0)
-            + lid_thickness (1.8)
-            + margin (1.0)
-            = ~32.0 mm for standard 11mm header
+PPI = sqrt(resolution_w² + resolution_h²) / display_diagonal_inch
+    = sqrt(240² + 240²) / 1.3 = 261.09 PPI
 ```
+
+(`25.4 / pixel_pitch = 260.51` is a *different* quantity computed from the active width; it is not an approximation of 261.09 and is not used as PPI anywhere in the code or this README.)
+
+Shell depth for the same HAT with the standard 11 mm header — the real `DimensionMath` stack (verified: it produces **70.0 × 35.1 × 32.0 mm**):
+
+```
+shell_depth = floor_thickness            2.5
+            + standoff_height            3.0
+            + host_pcb_thickness         1.6
+            + gpio_header_mated_gap     11.5   (standard_11mm)
+            + hat_pcb_thickness          1.6
+            + above_hat_pcb             10.0   = max(header_above 8.5, tallest_component 8.0) + 1.5 clearance
+            + lid_thickness              1.8
+            = 32.0 mm
+```
+
+The geometry JSON also carries this as `depth_breakdown`, so the UI, Blender, and this README cannot drift apart. `waveshare_hat_math_summary()` delegates to `DimensionMath.compute()` — there is no second depth formula.
 
 ---
 
 ## ⚡ Firmware Architecture
 
-Generated firmware follows a strict **11-phase boot sequence**:
+Generated firmware follows an **11-phase boot sequence** (phases 0–10 in `firmware_engine.BOOT_PHASES`; delays there are 50, 1, 5, 150, 50, 10, 5, 20, 10, 1, 0 ms — see the generated `README_FIRMWARE.md` for the per-phase table).
 
-```
-Phase 0 — Power rail settle         (100 ms)
-Phase 1 — GPIO init                 (50 ms)
-Phase 2 — SPI bus init              (20 ms)
-Phase 3 — I2C bus init              (20 ms)
-Phase 4 — Display controller init   (150 ms)
-Phase 5 — Backlight enable          (10 ms)
-Phase 6 — Input devices init        (50 ms)
-Phase 7 — Battery monitor init      (30 ms)
-Phase 8 — IMU init                  (100 ms)
-Phase 9 — Audio init                (50 ms)
-Phase 10 — Application start        (0 ms)
-```
-
-All inter-module communication goes through the typed **EventBus** (16 event types). No direct driver-to-driver calls.
+All inter-module communication goes through the typed **EventBus (11 event types)**. No direct driver-to-driver calls.
 
 ---
 
@@ -221,18 +215,20 @@ All inter-module communication goes through the typed **EventBus** (16 event typ
 
 ## 📦 Requirements
 
+Exactly as in `requirements.txt`:
+
 ```
-fastapi>=0.104
-uvicorn[standard]>=0.24
-requests>=2.31
-beautifulsoup4>=4.12
-lxml>=4.9
-pydantic>=2.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+pydantic>=2.0.0
 reportlab>=4.0
 ```
 
 **Optional:**
-- `blender` 3.x+ in `PATH` — for headless STL generation
+- `blender` 3.x+ in `PATH` — for headless STL generation (stage 4 is skipped without it)
 - Python 3.9+
 
 ---
