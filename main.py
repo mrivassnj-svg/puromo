@@ -44,7 +44,10 @@ from crawler.device_crawler import (
 from parser.dimension_math import DimensionMath, waveshare_hat_math_summary
 from modular.modular_entities import HandheldBuild
 from specs.assembly_specs import AssemblySpecGenerator
-from specs.pinout_engine import PinoutEngine, MODULE_PINOUTS, RPI_GPIO, WIRE_COLOURS
+from specs.pinout_engine import (
+    PinoutEngine, MODULE_PINOUTS, RPI_GPIO, WIRE_COLOURS,
+    verify_pinout, triage_conflicts,
+)
 from firmware.firmware_engine import BOOT_PHASES, DRIVER_DEPS, EVENT_TYPES, SCHEDULER_DESIGN
 from firmware.firmware_generator import FirmwareGenerator, topo_sort
 from report.pdf_report import PDFReportGenerator
@@ -621,6 +624,184 @@ def discover_printers():
     """Scan local network for 3D printers."""
     found = discover_printers_lan(timeout_s=4)
     return {"status": "ok", "found": found, "count": len(found)}
+
+
+# ---------------------------------------------------------------------------
+# Framework registries + capability engine (Requirements 1–4, additive)
+# ---------------------------------------------------------------------------
+
+REGISTRY_DIR = Path(__file__).parent / "data" / "registries"
+
+
+def _load_registry(name: str) -> list:
+    p = REGISTRY_DIR / f"{name}.json"
+    try:
+        return json.loads(p.read_text())
+    except Exception as exc:  # missing/corrupt registry → empty, never crash
+        logger.warning("registry %s unavailable: %s", name, exc)
+        return []
+
+
+def _registries() -> dict:
+    return {
+        "brains": _load_registry("brains"),
+        "modules": _load_registry("modules"),
+        "power_sources": _load_registry("power_sources"),
+    }
+
+
+class CapabilityRequest(BaseModel):
+    brain_id: str
+    module_ids: List[str] = []
+
+
+class VerifyRequest(BaseModel):
+    spec: dict
+
+
+def _module_reasons(brain: dict, module: dict, selected: list,
+                    modules_by_id: dict) -> list:
+    """Why `module` cannot run on `brain` given the already-selected modules.
+    Empty list = capable. Checks, in order: interface, power, footprint."""
+    reasons = []
+    req = module.get("requires") or {}
+    ifaces = brain.get("interfaces") or {}
+    for iface, need in (req.get("interfaces") or {}).items():
+        have = ifaces.get(iface)
+        if isinstance(need, (int, float)) and not isinstance(need, bool):
+            if not have or have < need:
+                reasons.append(
+                    f"Interface: needs {iface.upper()} x{int(need)} — "
+                    f"{brain['name']} provides {int(have or 0)}")
+        elif need and not have:
+            reasons.append(
+                f"Interface: needs {iface.replace('_', ' ')} — "
+                f"not present on {brain['name']}")
+    # Power: board base draw + every selected module (incl. this one).
+    sel = [modules_by_id[m] for m in selected if m in modules_by_id]
+    if module["id"] not in [m["id"] for m in sel]:
+        sel = sel + [module]
+    mods_ma = sum(int((m.get("requires") or {}).get("pins_ma") or 0) for m in sel)
+    total = int(brain.get("base_draw_ma") or 0) + mods_ma
+    budget = int(brain.get("max_current_ma") or 0)
+    if budget and total > budget:
+        reasons.append(
+            f"Power: total draw {total} mA (board base "
+            f"{int(brain.get('base_draw_ma') or 0)} mA + modules {mods_ma} mA) "
+            f"exceeds the {budget} mA supply rating of the {brain['name']}")
+    # Footprint: only where the registry fixes a size (stacked/mounted parts).
+    fw, fh = req.get("footprint_w_mm"), req.get("footprint_h_mm")
+    if fw and fh:
+        if fw > brain["board_w_mm"] + 1.0 or fh > brain["board_h_mm"] + 1.0:
+            reasons.append(
+                f"Fit: footprint {fw} x {fh} mm exceeds the "
+                f"{brain['name']} board ({brain['board_w_mm']} x "
+                f"{brain['board_h_mm']} mm)")
+    return reasons
+
+
+def _alternative_brain(current: dict, module: dict, selected: list,
+                       brains: list, modules_by_id: dict):
+    """Most probable alternative board for an incapable module: a board where
+    the module IS capable and the most already-selected modules stay capable;
+    ties broken by smallest board-area change."""
+    best, best_key = None, None
+    cur_area = current["board_w_mm"] * current["board_h_mm"]
+    for b in brains:
+        if b["id"] == current["id"]:
+            continue
+        if _module_reasons(b, module, selected, modules_by_id):
+            continue
+        preserved = sum(
+            1 for mid in selected
+            if mid in modules_by_id
+            and not _module_reasons(b, modules_by_id[mid], selected,
+                                    modules_by_id))
+        area_change = abs(b["board_w_mm"] * b["board_h_mm"] - cur_area)
+        key = (preserved, -area_change)
+        if best_key is None or key > best_key:
+            best, best_key = b, key
+    if best is None:
+        return None
+    return {
+        "brain_id": best["id"],
+        "brain_name": best["name"],
+        "preserves": best_key[0],
+        "selected_total": len([m for m in selected if m in modules_by_id]),
+    }
+
+
+@app.get("/api/registries")
+def get_registries():
+    """Verified registries: main boards (brains), feature modules, power
+    sources. Seeded from code/vendor facts — see data/registries/*.json."""
+    regs = _registries()
+    return {"status": "ok", **regs,
+            "counts": {k: len(v) for k, v in regs.items()}}
+
+
+@app.post("/api/capability")
+def post_capability(req: CapabilityRequest):
+    """Capability map: for each requested module, capable or incapable FOR
+    THE SELECTED BRAIN, with reasons; plus the most probable alternative
+    brain for each incapable module."""
+    regs = _registries()
+    brains_by_id = {b["id"]: b for b in regs["brains"]}
+    modules_by_id = {m["id"]: m for m in regs["modules"]}
+    brain = brains_by_id.get(req.brain_id)
+    if brain is None:
+        raise HTTPException(404, f"unknown brain_id: {req.brain_id}")
+    results, alternatives = [], {}
+    for mid in req.module_ids:
+        module = modules_by_id.get(mid)
+        if module is None:
+            results.append({"module_id": mid, "capable": False,
+                            "reasons": [f"Unknown module id: {mid}"]})
+            continue
+        reasons = _module_reasons(brain, module, req.module_ids, modules_by_id)
+        results.append({"module_id": mid, "capable": not reasons,
+                        "reasons": reasons})
+        if reasons:
+            alt = _alternative_brain(brain, module, req.module_ids,
+                                     regs["brains"], modules_by_id)
+            if alt:
+                alternatives[mid] = alt
+    sel_ma = sum(int((modules_by_id[m].get("requires") or {}).get("pins_ma")
+                     or 0)
+                 for m in req.module_ids if m in modules_by_id)
+    return {
+        "status": "ok",
+        "brain": {"id": brain["id"], "name": brain["name"]},
+        "results": results,
+        "alternatives": alternatives,
+        "totals": {
+            "base_draw_ma": int(brain.get("base_draw_ma") or 0),
+            "selected_modules_ma": sel_ma,
+            "total_ma": int(brain.get("base_draw_ma") or 0) + sel_ma,
+            "budget_ma": int(brain.get("max_current_ma") or 0),
+        },
+    }
+
+
+@app.post("/api/pinout/verify")
+def post_pinout_verify(req: VerifyRequest):
+    """Five-check pinout verification + conflict triage (Requirements 2e/2f).
+    Runs the pinout engine on the spec, then checks the result for internal
+    consistency five ways, and gives each conflict an industry-style verdict:
+    'DIY simple fix' or 'Not worth the time'."""
+    result = PinoutEngine(req.spec).generate()
+    checks = verify_pinout(result)
+    return {
+        "status": "ok",
+        "checks": checks,
+        "passed": sum(1 for c in checks if c["pass"]),
+        "total": len(checks),
+        "all_pass": all(c["pass"] for c in checks),
+        "conflicts": result.get("conflicts", []),
+        "triage": triage_conflicts(result),
+        "power_budget": result.get("power_budget", {}),
+        "selected_modules": result.get("selected_modules", []),
+    }
 
 
 # ---------------------------------------------------------------------------

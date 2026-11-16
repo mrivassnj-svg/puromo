@@ -537,6 +537,13 @@ class PinoutEngine:
         # Always include power
         mods.append("usbc_power")
 
+        # Feature Modules tab (framework R1): modules the user explicitly
+        # added from the verified registry join the inferred set. Additive —
+        # with no 'selected_modules' in the spec, behaviour is unchanged.
+        for extra in self.spec.get("selected_modules") or []:
+            if extra in MODULE_PINOUTS and extra not in mods:
+                mods.append(extra)
+
         return list(dict.fromkeys(mods))  # deduplicate, preserve order
 
     def _build_wiring_table(self, mod: dict) -> dict:
@@ -621,3 +628,217 @@ class PinoutEngine:
                 for note in mod.get("safety_notes", []):
                     checks.append({"check": note, "status": "critical"})
         return checks
+
+
+# ---------------------------------------------------------------------------
+# Five-check pinout verification + conflict triage (framework R2e / R2f)
+# ---------------------------------------------------------------------------
+# The user's verification standard: the program's pinout mapping must be
+# checked five ways before it is trusted. verify_pinout() cross-checks a
+# generate() result against MODULE_PINOUTS and the standard 40-pin table.
+# triage_conflicts() gives every conflict an industry-style verdict:
+# "DIY simple fix" (with the fix) or "Not worth the time" (with a reason).
+
+SHARED_BUS_PINS = {
+    "GPIO10": "SPI MOSI", "GPIO9": "SPI MISO", "GPIO11": "SPI SCLK",
+    "GPIO2": "I2C SDA", "GPIO3": "I2C SCL",
+}
+BUS_ROLES = {"MOSI", "MISO", "SCLK", "SDA", "SCL"}
+POWER_ROLES = ("GND", "3V3", "5V")
+
+
+def verify_pinout(result: dict) -> List[dict]:
+    """Five concrete consistency checks on a PinoutEngine.generate() result.
+    Returns [{n, name, pass, detail}] — pass means the mapping is internally
+    consistent, NOT that the design has no conflicts."""
+    selected = result.get("selected_modules", [])
+    gpio_map = {e["gpio_key"]: e for e in result.get("gpio_map", [])}
+    checks = []
+
+    # 1 — every module pin exists in the GPIO map
+    missing = []
+    for mid in selected:
+        for pin in MODULE_PINOUTS.get(mid, {}).get("pins", []):
+            gk = pin.get("gpio_key")
+            if gk and gk not in gpio_map:
+                missing.append(f"{mid}:{gk}")
+    checks.append({
+        "n": 1, "name": "Every module pin exists in the GPIO map",
+        "pass": not missing,
+        "detail": ("all module pins resolve in the 40-pin map"
+                   if not missing else f"missing: {', '.join(missing)}"),
+    })
+
+    # 2 — no pin double-claimed beyond the reported conflicts (mirrors
+    # detect_conflicts exactly: same role filter, same counting)
+    pin_usage: Dict[str, List[str]] = {}
+    for mid in selected:
+        mod = MODULE_PINOUTS.get(mid)
+        if not mod:
+            continue
+        for pin in mod["pins"]:
+            gk = pin.get("gpio_key")
+            if gk and pin["role"] not in POWER_ROLES:
+                pin_usage.setdefault(gk, []).append(mod["label"])
+    double_claimed = {k for k, v in pin_usage.items() if len(v) > 1}
+    reported = {c["gpio_key"] for c in result.get("conflicts", [])}
+    checks.append({
+        "n": 2,
+        "name": "No exclusive pin double-claimed beyond reported conflicts",
+        "pass": double_claimed == reported,
+        "detail": (f"double claims {sorted(double_claimed)} exactly match the "
+                   f"{len(reported)} reported conflict(s)"
+                   if double_claimed == reported else
+                   f"mismatch — double-claimed {sorted(double_claimed)} vs "
+                   f"reported {sorted(reported)}"),
+    })
+
+    # 3 — wiring tables' pins match the module claims
+    mismatch = []
+    for mid, table in (result.get("wiring_tables") or {}).items():
+        expected = {p["gpio_key"] for p in
+                    MODULE_PINOUTS.get(mid, {}).get("pins", [])
+                    if p.get("gpio_key")}
+        got = {r["gpio_key"] for r in table.get("rows", [])
+               if r.get("gpio_key") and r["gpio_key"] != "—"}
+        if expected != got:
+            mismatch.append(mid)
+    checks.append({
+        "n": 3, "name": "Wiring tables match module pin claims",
+        "pass": not mismatch,
+        "detail": ("every wiring table lists exactly its module's pins"
+                   if not mismatch else
+                   f"mismatch in: {', '.join(mismatch)}"),
+    })
+
+    # 4 — power total equals the sum of module draws
+    pb = result.get("power_budget", {})
+    expect_mods = sum(MODULE_CURRENT_MA.get(m, 0) for m in selected)
+    ok4 = (pb.get("modules_total_ma") == expect_mods
+           and pb.get("grand_total_ma")
+           == expect_mods + pb.get("host_tdp_ma", 0))
+    checks.append({
+        "n": 4, "name": "Power total equals the sum of module draws",
+        "pass": bool(ok4),
+        "detail": (f"modules {expect_mods} mA + host "
+                   f"{pb.get('host_tdp_ma')} mA = {pb.get('grand_total_ma')} mA"
+                   if ok4 else
+                   f"reported modules_total_ma={pb.get('modules_total_ma')} "
+                   f"vs summed {expect_mods} mA"),
+    })
+
+    # 5 — physical pins within 1..40 and BCM/physical mapping matches the
+    # standard 40-pin table
+    bad = []
+    seen_phys = set()
+    for gk, info in RPI_GPIO.items():
+        ph = info.get("phys")
+        if not isinstance(ph, int) or not (1 <= ph <= 40) or ph in seen_phys:
+            bad.append(f"{gk}:phys={ph}")
+        seen_phys.add(ph)
+    for mid, table in (result.get("wiring_tables") or {}).items():
+        for row in table.get("rows", []):
+            gk = row.get("gpio_key")
+            if gk in RPI_GPIO:
+                std = RPI_GPIO[gk]
+                if row.get("phys_pin") != std["phys"]:
+                    bad.append(f"{mid}:{gk} phys {row.get('phys_pin')} "
+                               f"!= standard {std['phys']}")
+                rb, sb = row.get("bcm"), std.get("bcm")
+                if isinstance(rb, int) and isinstance(sb, int) and rb != sb:
+                    bad.append(f"{mid}:{gk} BCM {rb} != standard {sb}")
+    checks.append({
+        "n": 5,
+        "name": "Physical pins 1..40, BCM-physical mapping matches the "
+                "standard 40-pin table",
+        "pass": not bad,
+        "detail": ("all 40 pins in range; every wiring row matches the "
+                   "standard table" if not bad else "; ".join(bad[:4])),
+    })
+    return checks
+
+
+def _free_gpio(result: dict):
+    """First unclaimed true-GPIO pin on the header (skips ID EEPROM pins)."""
+    for entry in result.get("gpio_map", []):
+        if entry.get("claimed_by"):
+            continue
+        if entry["gpio_key"] in ("GPIO0", "GPIO1"):
+            continue  # ID_SD / ID_SC — reserved for HAT EEPROM
+        if "GPIO" in (entry.get("caps") or []):
+            return entry
+    return None
+
+
+def triage_conflicts(result: dict) -> List[dict]:
+    """One verdict per conflict, from a small rule table:
+    - shared-bus pin claimed only in bus roles → DIY (sharing is by design;
+      separate the chip-selects).
+    - chip-select landed on a shared-bus pin → DIY (move CS to a free GPIO).
+    - two modules hard-claim one exclusive pin → DIY if a free compatible
+      GPIO exists (named), else Not worth the time.
+    - power over budget → DIY (wired/official PSU or powered hub) unless the
+      draw is more than 2x the budget → Not worth the time."""
+    out = []
+    selected = result.get("selected_modules", [])
+    for c in result.get("conflicts", []):
+        key = c["gpio_key"]
+        roles = []
+        for mid in selected:
+            for pin in MODULE_PINOUTS.get(mid, {}).get("pins", []):
+                if pin.get("gpio_key") == key:
+                    roles.append(pin.get("role"))
+        if key in SHARED_BUS_PINS and roles and all(r in BUS_ROLES
+                                                    for r in roles):
+            verdict = "DIY simple fix"
+            fix = (f"{SHARED_BUS_PINS[key]} is a shared bus line — sharing "
+                   "it is by design, not a fault. Keep the bus pins shared "
+                   "and give each device its own chip-select (CE0 = GPIO8, "
+                   "CE1 = GPIO7, or another free GPIO).")
+        elif key in SHARED_BUS_PINS and "CS" in roles:
+            free = _free_gpio(result)
+            verdict = "DIY simple fix"
+            fix = (f"A chip-select landed on shared bus pin {key}. Move "
+                   f"that CS line to free {free['gpio_key']} (physical pin "
+                   f"{free['phys']})." if free else
+                   f"A chip-select landed on shared bus pin {key}, and no "
+                   "GPIO is free to move it to — free one up first.")
+        else:
+            free = _free_gpio(result)
+            if free:
+                verdict = "DIY simple fix"
+                fix = (f"Two modules hard-claim {key}. Move one module's "
+                       f"{key} connection to free {free['gpio_key']} "
+                       f"(physical pin {free['phys']}, {free['name']}) and "
+                       "update that module's driver config to match.")
+            else:
+                verdict = "Not worth the time"
+                fix = (f"No free compatible GPIO remains on the 40-pin "
+                       f"header for {key}. Drop one of the two modules, or "
+                       "add an I2C GPIO expander (e.g. MCP23017) — rewiring "
+                       "by hand will not solve a header that is full.")
+        out.append({
+            "type": "pin", "gpio_key": key,
+            "phys_pin": c.get("phys_pin"), "bcm": c.get("bcm"),
+            "between": c.get("conflict_between", []),
+            "verdict": verdict, "fix": fix,
+        })
+    pb = result.get("power_budget", {})
+    if pb and not pb.get("within_budget", True):
+        total = pb.get("grand_total_ma", 0)
+        budget = pb.get("budget_ma", 4500)
+        if total <= 2 * budget:
+            verdict = "DIY simple fix"
+            fix = (f"Total draw {total} mA is over the {budget} mA budget "
+                   "line. Run wire-to-outlet with the official PSU for the "
+                   "board, or add a powered USB hub — do not power this "
+                   "build from a battery bay sized for less.")
+        else:
+            verdict = "Not worth the time"
+            fix = (f"Total draw {total} mA is more than 2x the {budget} mA "
+                   "budget. Split the build across two supplies/boards "
+                   "instead of trying to feed it from one header.")
+        out.append({"type": "power", "gpio_key": None, "phys_pin": None,
+                    "bcm": None, "between": [], "verdict": verdict,
+                    "fix": fix})
+    return out
