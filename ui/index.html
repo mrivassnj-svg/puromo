@@ -144,19 +144,15 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <div id="hat-deck-list"></div>
   </div>
 
-  <!-- Known HATs (PCB brain for selected deck) -->
+  <!-- Known HATs (verified registry devices only).
+       Framework R3a: the free-text Lookup (search input + Lookup button +
+       suggestions) was CUT by the user's audit — it never returned
+       verified data. Only the known, tested devices below remain, and
+       they load through doCrawl with registry keys. -->
   <div class="sb-section">
-    <h4>🧠 Brain PCB</h4>
+    <h4>🎩 Known HATs — verified</h4>
     <div id="known-list"></div>
-    <div style="margin-top:7px">
-      <input id="q-input" type="text" placeholder="Search other boards…"
-        oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doCrawl()"
-        style="font-size:.77rem"/>
-      <div class="btn-row" style="margin-top:5px">
-        <button class="btn btn-secondary" style="font-size:.74rem;padding:5px 10px" onclick="doCrawl()">Lookup</button>
-      </div>
-      <div id="search-suggestions" style="font-size:.72rem;color:var(--muted);margin-top:4px"></div>
-    </div>
+    <div class="hint" style="margin-top:6px">Verified devices only. Pick the main board in the Brain tab, then add feature modules — arbitrary device lookup was removed (Requirement 3).</div>
   </div>
 
   <!-- Build options -->
@@ -164,9 +160,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <h4>⚙️ Build Options</h4>
     <label>Model Name</label>
     <input id="model-name" type="text" value="handheld_v1"/>
-    <label>GPIO Header</label>
-    <select id="header-variant"></select>
-    <div id="header-info" class="hint" style="margin-top:4px"></div>
+    <div class="hint" style="margin:4px 0 8px">GPIO header variant moved to the <b>GPIO Header</b> tab — the bridge between construct and concept (Requirement 3).</div>
     <label><input type="checkbox" id="inc-battery" style="width:auto;margin-right:5px"/>Battery Bay</label>
     <input id="bat-size" type="text" value="50,20,6" placeholder="W,H,D mm" style="margin-top:4px"/>
     <div class="btn-row">
@@ -244,11 +238,15 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 <!-- ═══ MAIN ═══ -->
 <main class="main">
 <div class="tabs">
-  <div class="tab active"   onclick="showTab('t-deck',this)">🎩 Deck</div>
-  <div class="tab"          onclick="showTab('t-3d',this)">3D View</div>
+  <div class="tab active"   onclick="showTab('t-buildopts',this)">📋 Build Options</div>
+  <div class="tab"          onclick="showTab('t-deck',this)">🧠 Brain / Deck</div>
+  <div class="tab"          onclick="showTab('t-header',this)">🔌 GPIO Header</div>
+  <div class="tab"          onclick="showTab('t-modules',this)">🧩 Feature Modules</div>
+  <div class="tab"          onclick="showTab('t-pinout',this)">Pinout</div>
   <div class="tab"          onclick="showTab('t-spec',this)">Device Spec</div>
   <div class="tab"          onclick="showTab('t-geom',this)">Geometry</div>
-  <div class="tab"          onclick="showTab('t-pinout',this)">Pinout</div>
+  <div class="tab"          onclick="showTab('t-power',this)">🔋 Power</div>
+  <div class="tab"          onclick="showTab('t-3d',this)">Placement (3D)</div>
   <div class="tab"          onclick="showTab('t-wiring',this)">Wiring</div>
   <div class="tab"          onclick="showTab('t-asm',this)">Assembly</div>
   <div class="tab"          onclick="showTab('t-firmware',this)">Firmware</div>
@@ -257,8 +255,52 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
   <div class="tab"          onclick="showTab('t-files',this)">Files</div>
 </div>
 
-<!-- ── DECK VIEW ── -->
-<div id="t-deck" class="tab-pane" style="display:flex;flex-direction:column;gap:0;padding:0">
+<!-- ── BUILD OPTIONS (framework R3b: the personal entry point, first tab) ── -->
+<div id="t-buildopts" class="tab-pane" style="display:flex;flex-direction:column;gap:14px">
+  <div class="card">
+    <div class="section-hd">📋 Your builds</div>
+    <p class="hint" style="margin-bottom:10px">This is your personal entry point: your own builds and designs live here.
+      Saving uses the same store as the Files tab (this browser, up to 3 builds) — nothing here replaces it.</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="bo-slot-name" type="text" placeholder="Name for this build…" style="max-width:260px"/>
+      <button class="btn btn-primary" onclick="saveBuildFromOptions()">💾 Save current build</button>
+    </div>
+    <div id="bo-saved-list" style="margin-top:10px"></div>
+  </div>
+  <div class="card">
+    <div class="section-hd">🧭 The build flow</div>
+    <div style="font-size:.83rem;line-height:2">
+      <div>1 · <b>Brain</b> — choose the main board first; every feature is mapped against it. <button class="btn btn-secondary" style="font-size:.72rem;padding:3px 9px" onclick="jumpToTab('t-deck')">Open</button></div>
+      <div>2 · <b>GPIO Header</b> — the bridge: identify the header that joins board and HAT (or none). <button class="btn btn-secondary" style="font-size:.72rem;padding:3px 9px" onclick="jumpToTab('t-header')">Open</button></div>
+      <div>3 · <b>Feature Modules</b> — add verified modules, capable or explained-incapable. <button class="btn btn-secondary" style="font-size:.72rem;padding:3px 9px" onclick="jumpToTab('t-modules')">Open</button></div>
+      <div>4 · <b>Pinout → Power → Placement → Wiring</b> — settle the boards, then power, then placement, then the 5×-checked wiring. <button class="btn btn-secondary" style="font-size:.72rem;padding:3px 9px" onclick="jumpToTab('t-pinout')">Open</button></div>
+      <div>5 · <b>Assembly · Firmware · Report · Print</b> — the original build depth, unchanged.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="section-hd">🖨 Final documentation → printer</div>
+    <p class="hint" style="margin-bottom:10px">When the design is settled, the effortless path is: generate the PDF build report, then create the print package.</p>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="jumpToTab('t-report')">📄 Go to Report tab</button>
+      <button class="btn btn-secondary" onclick="jumpToTab('t-print')">🖨 Go to Print tab</button>
+    </div>
+    <div class="hint" style="margin-top:8px">Safeguard (Requirement 5): the Print tab checks the overlap map first — any marked overlap must be acknowledged by name before a package can be created.</div>
+  </div>
+</div>
+
+<!-- ── DECK VIEW / BRAIN (framework R1: main board chosen here, first) ── -->
+<div id="t-deck" class="tab-pane" style="display:none;flex-direction:column;gap:0;padding:0">
+
+  <!-- Main-board selection: brain first, before any features -->
+  <div id="brain-section" style="padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
+    <div class="section-hd">🧠 Step 1 — Choose the main board</div>
+    <div class="hint" style="margin-bottom:9px">The main operating board comes first — before any features. Every module in the Feature Modules tab is then mapped <b>capable</b> or <b>incapable for this board</b>, with the reason shown (interface, pins, power, fit). Until a board is chosen, the Feature Modules tab stays locked.</div>
+    <div id="brain-list" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    <div class="btn-row" style="margin-top:9px">
+      <button class="btn btn-secondary" onclick="useBrainOnly()">Use main board only — no HAT</button>
+    </div>
+    <div id="brain-status" class="hint" style="margin-top:6px">No main board chosen yet. The cyberdeck archetypes below still work as before — choosing one loads its verified HAT.</div>
+  </div>
 
   <!-- Hero bar -->
   <div id="deck-hero" style="padding:14px 18px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0">
@@ -328,8 +370,57 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
   </div><!-- end grid -->
 </div>
 
-<!-- ── 3D VIEW ── -->
-<div id="t-3d" class="tab-pane" style="display:flex;flex-direction:column;gap:14px;padding:14px">
+<!-- ── GPIO HEADER IDENTIFIER (framework R3c: the bridge) ── -->
+<div id="t-header" class="tab-pane" style="display:none">
+  <div class="card">
+    <div class="section-hd">🔌 GPIO Header Identifier — the bridge between construct and concept</div>
+    <p class="hint" style="margin-bottom:10px">The header is the physical bridge between the main board (the construct) and everything the pinout promises (the concept).
+      Identify what is actually fitted — some boards have a header built in, some have none at all. The choice feeds the same
+      <span style="font-family:monospace">gpio_header_*</span> spec fields the sidebar select always fed, so the geometry stack math is unchanged.</p>
+    <label>Header fitted to your main board</label>
+    <select id="header-variant"></select>
+    <div id="header-info" class="hint" style="margin-top:4px"></div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn btn-secondary" onclick="setNoHeader()">🚫 No header / not built in</button>
+    </div>
+    <div class="hint" style="margin-top:6px">“No header” selects the soldered-direct variant (above 0 mm · below 0 mm · mated gap 1.0 mm): the boards sit flat and are not removable.</div>
+    <div id="header-variant-table" style="margin-top:14px"></div>
+  </div>
+</div>
+
+<!-- ── FEATURE MODULES (framework R1: capability-mapped registry) ── -->
+<div id="t-modules" class="tab-pane" style="display:none">
+  <div class="card">
+    <div class="section-hd">🧩 Feature Modules — mapped against your main board</div>
+    <div id="modules-gate" class="hint" style="font-size:.85rem">🔒 Choose a main board in the <b>Brain</b> tab first — modules can only be judged against a board.</div>
+    <div id="modules-brain-summary" style="font-size:.83rem;margin-bottom:8px"></div>
+    <div id="modules-list"></div>
+    <div id="modules-alt" style="margin-top:10px"></div>
+    <div class="hint" style="margin-top:10px">Modules come from the verified registry (real, tested/known parts with their requirements — no live lookup).
+      Adding one feeds the existing flow: a HAT loads its verified device spec; a pinout-linked module joins the pinout engine's selected set;
+      the camera adds a placement step in the Placement tab. Incapable modules stay visible with their reasons — never hidden.</div>
+  </div>
+</div>
+
+<!-- ── 3D VIEW / PLACEMENT (framework R2c/R2d: final render of the placement) ── -->
+<div id="t-3d" class="tab-pane" style="display:none;flex-direction:column;gap:14px;padding:14px">
+  <div class="card">
+    <div class="section-hd">🧊 Placement — final render</div>
+    <div class="hint">Board-to-board placement is authored exactly by the Blender replica script (Assembly tab → generate the build/STL); this view is the final render of that placement.
+      The chosen battery pack (Power tab) renders in its bay here, the camera aperture is cut in the lid, and any overlap the safeguard found is marked in the reserved conflict colour <span style="color:#ff2d78;font-weight:700">#ff2d78</span>.</div>
+  </div>
+  <div class="card" id="camera-card" style="display:none">
+    <div class="section-hd">📷 Camera placement — the eyes</div>
+    <label>Mounting zone</label>
+    <select id="camera-zone" onchange="setCameraZone(this.value)">
+      <option value="front_top">Front-top edge</option>
+      <option value="front_bottom">Front-bottom edge</option>
+      <option value="lid_centre">Lid centre</option>
+    </select>
+    <div id="camera-status" class="hint" style="margin-top:6px"></div>
+    <div class="hint" style="margin-top:4px">The camera board (25×24 mm) connects to the main board's CSI port with a CSI-2 15-pin ribbon — the route is written into the assembly notes.
+      A zone is SAFE only if the aperture clears the display cutout, the bosses and the button apertures; an unsafe zone is marked as an overlap conflict, not silently accepted.</div>
+  </div>
   <canvas id="viewport"></canvas>
   <div style="display:flex;gap:12px;flex-wrap:wrap">
     <div class="card" style="flex:1;min-width:220px">
@@ -399,7 +490,30 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 </div>
 
 <!-- ── WIRING DIAGRAM ── -->
+<!-- ── POWER / BATTERY BAY (framework R4: its own tab, wired first) ── -->
+<div id="t-power" class="tab-pane" style="display:none">
+  <div class="card">
+    <div class="section-hd">🔋 Power — Battery Bay</div>
+    <p class="hint" style="margin-bottom:10px">Power comes after the boards and their wiring are settled, because the final design's needs are only known then.
+      The starting path is <b>wired</b> — wire to outlet, no commitment. Choose a pack only when you are ready; it is then rendered in place in the Placement view before anything is printed.</p>
+    <div id="power-budget-info" class="hint" style="margin-bottom:10px">Power budget: run the pipeline (Pinout) to see the design's draw here.</div>
+    <div id="power-list"></div>
+    <div class="hint" style="margin-top:8px">Selecting a pack drives the existing battery flow (include_battery + battery_size_mm), so the modular build and the Blender battery bay use exactly the pack you picked. Dimensions are nominal vendor dims from the registry.</div>
+  </div>
+</div>
+
 <div id="t-wiring" class="tab-pane" style="display:none">
+  <div class="card" style="margin-bottom:14px">
+    <div class="section-hd">✅ Pinout verification — checked 5 ways</div>
+    <div id="verify-status" class="hint">Not verified yet. The program's pinout mapping is checked five ways: every module pin exists in the GPIO map · no exclusive pin double-claimed beyond the reported conflicts · wiring tables match module claims · power total equals the sum of module draws · physical pins 1–40 with the standard BCM↔physical mapping.</div>
+    <div id="verify-checks" style="font-size:.8rem;margin-top:6px"></div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn btn-secondary" onclick="runPinoutVerify()">Run 5× verification</button>
+    </div>
+    <div class="section-hd" style="margin-top:14px">🛠 Conflict triage — DIY simple fix, or not worth the time</div>
+    <div id="triage-list"><div class="hint">No triage yet — verification produces it.</div></div>
+    <div class="hint" style="margin-top:6px">Conflicts are also marked on the wiring diagram below in the reserved conflict colour <span style="color:#ff2d78;font-weight:700">#ff2d78</span>, at the physical pin where they occur.</div>
+  </div>
   <div class="card" style="margin-bottom:14px">
     <h3>Interactive Wiring Diagram</h3>
     <p class="hint" style="margin-bottom:10px">Each wire connects a module pin to the matching RPi GPIO. Hover a wire to highlight the full net.</p>
@@ -490,6 +604,15 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 
 <!-- ── PRINT SERVER ── -->
 <div id="t-print" class="tab-pane" style="display:none">
+  <!-- Overlap safeguard gate (framework R5): visible only when the current
+       geometry has marked overlaps; package/print stay disabled until the
+       user acknowledges them by name. -->
+  <div class="card" id="overlap-gate-card" style="display:none;border:1.5px solid #ff2d78;margin-bottom:14px">
+    <div class="section-hd" style="color:#ff2d78">⛔ Overlap safeguard — marked conflicts in this design</div>
+    <div class="hint" style="margin-bottom:8px">The overlap map found physical interferences, marked in the Placement view in the reserved conflict colour. Printing with them unresolved will produce a shell whose parts collide. They are listed here by name:</div>
+    <div id="overlap-gate-list" style="font-size:.82rem;line-height:1.8"></div>
+    <label style="margin-top:10px;font-size:.85rem"><input type="checkbox" id="overlap-ack" style="width:auto;margin-right:6px" onchange="refreshOverlapGate()"/>I have seen the marked overlaps and choose to proceed</label>
+  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
 
     <div class="card" style="grid-column:1/-1">
@@ -520,7 +643,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
       <label>Select Printer</label>
       <select id="pkg-printer-key"></select>
       <div class="btn-row">
-        <button class="btn btn-purple" onclick="createPrintPackage()">📦 Create Print Package</button>
+        <button class="btn btn-purple" id="pkg-btn" onclick="createPrintPackage()">📦 Create Print Package</button>
       </div>
       <div id="pkg-status" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
     </div>
@@ -533,7 +656,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
           <select id="print-file-select"></select>
         </div>
         <div class="btn-row" style="margin-top:0">
-          <button class="btn btn-green" onclick="uploadAndPrint()">⬆ Upload & Print</button>
+          <button class="btn btn-green" id="send-btn" onclick="uploadAndPrint()">⬆ Upload & Print</button>
           <button class="btn btn-secondary" onclick="getPrinterStatus()">📊 Status</button>
         </div>
       </div>
