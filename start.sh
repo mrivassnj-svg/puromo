@@ -68,7 +68,7 @@ if command -v blender &>/dev/null; then
   echo "✓ Blender found: $BLENDER_VER"
   echo "  STL export via Blender will be available."
 else
-  echo "⚠  Blender not found in PATH — STL stage will be marked skipped."
+  echo "⚠  Blender not found in PATH — STL generation will be skipped."
   echo "   Install Blender 3.x+ from https://www.blender.org/download/"
   echo "   then add to PATH, or set BLENDER=/path/to/blender in environment."
 fi
@@ -82,7 +82,7 @@ else
 fi
 
 # ── Output directory ──────────────────────────────────
-mkdir -p output data/devices data/templates data/saved_builds
+mkdir -p output data/devices data/templates
 echo "✓ Output directories ready"
 
 echo ""
