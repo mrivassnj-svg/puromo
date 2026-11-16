@@ -925,8 +925,8 @@ function buildShell3D(geom) {
   const wallH = splitY - FT;
   const wallGroup = new THREE.Group();
   [
-    [W,   wallH, WT,     W/2,      FT+wallH/2,  WT/2    ],  // front
-    [W,   wallH, WT,     W/2,      FT+wallH/2,  H-WT/2  ],  // back
+    [W,   wallH, WT,     W/2,      FT+wallH/2,  WT/2    ],  // back (geometry y = H edge)
+    [W,   wallH, WT,     W/2,      FT+wallH/2,  H-WT/2  ],  // front (geometry y = 0 edge)
     [WT,  wallH, H-2*WT, WT/2,     FT+wallH/2,  H/2     ],  // left
     [WT,  wallH, H-2*WT, W-WT/2,   FT+wallH/2,  H/2     ],  // right
   ].forEach(([ww,wh,wd,px,py,pz])=>{
@@ -939,23 +939,30 @@ function buildShell3D(geom) {
   // ── PCB layer — always visible, positioned using exact spec coordinates ──
   // pcb_offset_x/y from geometry = wall_thickness + pcb_clearance = exact shell-local origin of PCB corner
   const OX = geom.pcb_offset_x || (WT + 0.5);   // PCB left edge in shell X
-  const OZ = geom.pcb_offset_y || (WT + 0.5);   // PCB front edge in shell Z
+  const OZ = geom.pcb_offset_y || (WT + 0.5);   // PCB edge at geometry y = pcb_offset_y
+  // Axis mapping — geometry y runs from the shell's front/bottom edge
+  // (DimensionMath: pcb_offset_y is the offset from the inner-bottom wall),
+  // and the Blender build places it along +Y with the same corner origin,
+  // as does the 2D blueprint (y up). Three.js +Z points TOWARD the default
+  // camera, so world z must be H - y. Placing z = y directly mirrors the
+  // preview front-to-back against the printed build.
+  const Z = (shellY) => H - shellY;
   const pcbY = FT + SOH;                         // bottom face of PCB
 
   // FR4 board — exact board dimensions, copper-green colour
   const pcbGeo = new THREE.BoxGeometry(BW, BT, BH);
   const pcbMesh = new THREE.Mesh(pcbGeo, mat('#1b4a1b', 1.0, 30));
-  pcbMesh.position.set(OX + BW/2, pcbY + BT/2, OZ + BH/2);
+  pcbMesh.position.set(OX + BW/2, pcbY + BT/2, Z(OZ + BH/2));
   pcbMesh.name = 'pcb_placeholder';
   scene.add(pcbMesh);
   shellObjects.pcb = pcbMesh;
 
   // Copper trace highlight strips (top/bottom edge, left/right edge — 0.3mm thick)
   const traceGroup = new THREE.Group();
-  [[BW, 0.3, 0.5, OX+BW/2, pcbY+BT, OZ+0.25],       // front edge trace
-   [BW, 0.3, 0.5, OX+BW/2, pcbY+BT, OZ+BH-0.25],    // back edge trace
-   [0.5, 0.3, BH, OX+0.25, pcbY+BT, OZ+BH/2],        // left edge trace
-   [0.5, 0.3, BH, OX+BW-0.25, pcbY+BT, OZ+BH/2],    // right edge trace
+  [[BW, 0.3, 0.5, OX+BW/2, pcbY+BT, Z(OZ+0.25)],    // front edge trace (board y = 0)
+   [BW, 0.3, 0.5, OX+BW/2, pcbY+BT, Z(OZ+BH-0.25)], // back edge trace (board y = BH)
+   [0.5, 0.3, BH, OX+0.25, pcbY+BT, Z(OZ+BH/2)],     // left edge trace
+   [0.5, 0.3, BH, OX+BW-0.25, pcbY+BT, Z(OZ+BH/2)],  // right edge trace
   ].forEach(([tw,th,td,px,py,pz])=>{
     const t = new THREE.Mesh(new THREE.BoxGeometry(tw,th,td), mat('#b87333', 1.0, 80));
     t.position.set(px,py,pz);
@@ -968,12 +975,12 @@ function buildShell3D(geom) {
   (geom.mounting_bosses||[]).forEach(b=>{
     // Annular copper ring on PCB
     const ring = new THREE.Mesh(new THREE.CylinderGeometry((b.r||2.5)+1.0, (b.r||2.5)+1.0, 0.1, 20), mat('#b87333', 1.0, 80));
-    ring.position.set(b.cx, pcbY+BT+0.05, b.cy);
+    ring.position.set(b.cx, pcbY+BT+0.05, Z(b.cy));
     bossGroup.add(ring);
     // Standoff pillar
     const bg = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, SOH, 20);
     const bm = new THREE.Mesh(bg, mat(SHELL_PARTS.stand.colour));
-    bm.position.set(b.cx, FT + SOH/2, b.cy);
+    bm.position.set(b.cx, FT + SOH/2, Z(b.cy));
     bossGroup.add(bm);
   });
   scene.add(bossGroup);
@@ -993,7 +1000,7 @@ function buildShell3D(geom) {
     // Display is on the left third of board (Waveshare HAT layout)
     // display_cutout center maps back to board: cx = dc.x + dc.w/2
     const dispCX = dc && dc.w > 0 ? dc.x + dc.w/2 : OX + BW * 0.33;
-    const dispCZ = dc && dc.h > 0 ? dc.y + dc.h/2 : OZ + BH / 2;
+    const dispCZ = Z(dc && dc.h > 0 ? dc.y + dc.h/2 : OZ + BH / 2);   // world z (flipped)
     const BEZEL = 1.2;
     const MOD_H = 1.6;   // display module body thickness
     const SCR_H = 0.8;   // screen glass thickness
@@ -1012,11 +1019,11 @@ function buildShell3D(geom) {
       new THREE.BoxGeometry(DW - 1.0, 0.12, DH - 1.0), mat('#1a4488', 0.80, 0));
     glow.position.set(dispCX, compY + MOD_H + 0.06, dispCZ);
     compGroup.add(glow);
-    // FPC ribbon cable exiting bottom of module
+    // FPC ribbon cable exiting the module's low-y edge (world +Z after the flip)
     const ribW = DW * 0.5;
     const ribL = 8.0;
     const rib = new THREE.Mesh(new THREE.BoxGeometry(ribW, 0.3, ribL), mat('#c8a820', 0.9, 40));
-    rib.position.set(dispCX, compY + 0.15, dispCZ - DH/2 - ribL/2);
+    rib.position.set(dispCX, compY + 0.15, dispCZ + DH/2 + ribL/2);
     compGroup.add(rib);
   }
 
@@ -1032,12 +1039,12 @@ function buildShell3D(geom) {
   const HDR_BX = 7.1;    // board-local X
   const HDR_BZ = 3.5;    // board-local Z
   const hdr = new THREE.Mesh(new THREE.BoxGeometry(HDR_W, HDR_H, HDR_D), mat('#0d0d14', 1.0, 20));
-  hdr.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H/2, OZ + HDR_BZ + HDR_D/2);
+  hdr.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H/2, Z(OZ + HDR_BZ + HDR_D/2));
   compGroup.add(hdr);
   // Gold pin row tops (2 thin strips — one per row)
   for (let row = 0; row < hdrRows; row++) {
     const pstrip = new THREE.Mesh(new THREE.BoxGeometry(HDR_W - 2.0, 0.5, 1.2), mat('#c8a820', 1.0, 120));
-    pstrip.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H, OZ + HDR_BZ + hdrPitch*0.5 + row*hdrPitch);
+    pstrip.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H, Z(OZ + HDR_BZ + hdrPitch*0.5 + row*hdrPitch));
     compGroup.add(pstrip);
   }
 
@@ -1046,7 +1053,7 @@ function buildShell3D(geom) {
   const joyD   = geom.joystick_diameter_mm || 12.0;
   if (joyRaw && joyRaw.length >= 2) {
     const jx = OX + joyRaw[0];
-    const jz = OZ + joyRaw[1];
+    const jz = Z(OZ + joyRaw[1]);
     // Square SMD switch body (12×12mm)
     const jbase = new THREE.Mesh(new THREE.BoxGeometry(joyD, 1.8, joyD), mat('#1e1e24', 1.0, 30));
     jbase.position.set(jx, compY + 0.9, jz);
@@ -1071,7 +1078,7 @@ function buildShell3D(geom) {
   // Each entry is [board_x, board_z, label]
   (geom.button_positions_mm || []).forEach(entry => {
     const bx = OX + entry[0];
-    const bz = OZ + entry[1];
+    const bz = Z(OZ + entry[1]);
     // 6×6mm SMD tact switch body, 3.5mm tall
     const body = new THREE.Mesh(new THREE.BoxGeometry(6, 3.5, 6), mat('#0e0e14', 1.0, 20));
     body.position.set(bx, compY + 1.75, bz);
@@ -1101,7 +1108,7 @@ function buildShell3D(geom) {
     ? (dc.y - OZ) + 2.0
     : BH * 0.25;
   const icBody = new THREE.Mesh(new THREE.BoxGeometry(5.5, 1.0, 5.5), mat('#080810', 1.0, 60));
-  icBody.position.set(OX + icBX + 2.75, compY + 0.5, OZ + icBZ + 2.75);
+  icBody.position.set(OX + icBX + 2.75, compY + 0.5, Z(OZ + icBZ + 2.75));
   compGroup.add(icBody);
   // 4-sided lead frame (silver strips around IC perimeter)
   [[icBX - 0.6, icBZ,       0.6, 5.5],
@@ -1110,12 +1117,12 @@ function buildShell3D(geom) {
    [icBX,       icBZ + 5.5, 5.5, 0.6],
   ].forEach(([lx, lz, lw, ld]) => {
     const lead = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.4, ld), mat('#aaaaaf', 1.0, 100));
-    lead.position.set(OX + lx + lw/2, compY + 0.1, OZ + lz + ld/2);
+    lead.position.set(OX + lx + lw/2, compY + 0.1, Z(OZ + lz + ld/2));
     compGroup.add(lead);
   });
   // Pin-1 silkscreen dot
   const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.08, 10), mat('#e8e8e8', 1.0, 40));
-  dot.position.set(OX + icBX + 0.6, compY + 1.0, OZ + icBZ + 0.6);
+  dot.position.set(OX + icBX + 0.6, compY + 1.0, Z(OZ + icBZ + 0.6));
   compGroup.add(dot);
 
   // ── 4× decoupling caps (0402 brown ceramics) right of IC ──
@@ -1125,7 +1132,7 @@ function buildShell3D(geom) {
    [icBX + 8.5, icBZ + 1.5],
   ].forEach(([cx, cz]) => {
     const cap = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.5), mat('#664422', 1.0, 30));
-    cap.position.set(OX + cx, compY + 0.25, OZ + cz);
+    cap.position.set(OX + cx, compY + 0.25, Z(OZ + cz));
     compGroup.add(cap);
   });
 
@@ -1144,18 +1151,18 @@ function buildShell3D(geom) {
   // Display window in lid
   if (dc && dc.w > 0) {
     const winMesh = new THREE.Mesh(new THREE.BoxGeometry(dc.w, LT+0.2, dc.h), mat('#050508'));
-    winMesh.position.set(dc.x + dc.w/2, lidY + LT/2, dc.y + dc.h/2);
+    winMesh.position.set(dc.x + dc.w/2, lidY + LT/2, Z(dc.y + dc.h/2));
     lidGroup.add(winMesh);
     // Glass pane
     const glassMesh = new THREE.Mesh(new THREE.BoxGeometry(dc.w-0.4, 0.3, dc.h-0.4), mat('#aaddff', 0.35));
-    glassMesh.position.set(dc.x + dc.w/2, lidY + LT + 0.1, dc.y + dc.h/2);
+    glassMesh.position.set(dc.x + dc.w/2, lidY + LT + 0.1, Z(dc.y + dc.h/2));
     lidGroup.add(glassMesh);
   }
 
   // Button holes in lid
   (geom.button_apertures||[]).forEach(b=>{
     const bhole = new THREE.Mesh(new THREE.CylinderGeometry(b.r||2, b.r||2, LT+0.2, 16), mat('#050508'));
-    bhole.position.set(b.cx, lidY + LT/2, b.cy);
+    bhole.position.set(b.cx, lidY + LT/2, Z(b.cy));
     lidGroup.add(bhole);
   });
 
@@ -1163,7 +1170,7 @@ function buildShell3D(geom) {
   const joy = geom.joystick_aperture;
   if (joy && joy.r > 0) {
     const jhole = new THREE.Mesh(new THREE.CylinderGeometry(joy.r||6, joy.r||6, LT+0.2, 24), mat('#050508'));
-    jhole.position.set(joy.cx, lidY + LT/2, joy.cy);
+    jhole.position.set(joy.cx, lidY + LT/2, Z(joy.cy));
     lidGroup.add(jhole);
   }
 
