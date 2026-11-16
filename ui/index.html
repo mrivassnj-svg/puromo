@@ -144,23 +144,12 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <div id="hat-deck-list"></div>
   </div>
 
-  <!-- Known HATs (verified registry devices only).
-       Framework R3a: the free-text Lookup (search input + Lookup button +
-       suggestions) was CUT by the user's audit — it never returned
-       verified data. Only the known, tested devices below remain, and
-       they load through doCrawl with registry keys. -->
-  <div class="sb-section">
-    <h4>🎩 Known HATs — verified</h4>
-    <div id="known-list"></div>
-    <div class="hint" style="margin-top:6px">Verified devices only. Pick the main board in the Brain tab, then add feature modules — arbitrary device lookup was removed (Requirement 3).</div>
-  </div>
-
   <!-- Build options -->
   <div class="sb-section">
     <h4>⚙️ Build Options</h4>
     <label>Model Name</label>
     <input id="model-name" type="text" value="handheld_v1"/>
-    <div class="hint" style="margin:4px 0 8px">GPIO header variant moved to the <b>GPIO Header</b> tab — the bridge between construct and concept (Requirement 3).</div>
+    <div class="hint" style="margin:4px 0 8px">GPIO header variant lives in the <b>Header &amp; Modules</b> tab — the bridge between construct and concept (Requirement 3).</div>
     <label><input type="checkbox" id="inc-battery" style="width:auto;margin-right:5px"/>Battery Bay</label>
     <input id="bat-size" type="text" value="50,20,6" placeholder="W,H,D mm" style="margin-top:4px"/>
     <div class="btn-row">
@@ -313,7 +302,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <div style="position:relative;background:#06080d;border-right:1px solid var(--border)">
       <canvas id="deck-viewport" style="display:block;width:100%;height:100%;min-height:420px"></canvas>
       <div style="position:absolute;top:10px;left:12px;font-size:.7rem;color:rgba(255,255,255,.25);pointer-events:none">Drag · Scroll · Right-drag pan</div>
-      <div style="position:absolute;top:10px;right:12px;font-size:.7rem;color:rgba(255,196,100,.85);pointer-events:none">⚠ Concept styling — Placement shows your actual build</div>
+      <div style="position:absolute;top:10px;right:12px;font-size:.7rem;color:rgba(255,196,100,.85);pointer-events:none">Inventory — this build's real components, rendered separately</div>
       <div id="deck-3d-label" style="position:absolute;bottom:10px;left:12px;font-size:.72rem;color:rgba(255,255,255,.3);pointer-events:none">Select a deck to preview</div>
     </div>
 
@@ -2161,118 +2150,121 @@ function initDeckRenderer() {
   deckAnimate();
 }
 
-function buildDeckScene(deck) {
+// ── Deck inventory (Requirement 7) ──────────────────────────────────────────
+// Selecting an archetype renders the build's REAL components — main board,
+// device board, feature modules, power — separately in 3D on this page, for
+// inventory. Every size comes from a fact source (brain registry board dims,
+// the loaded device spec, module registry footprints, power registry dims).
+// A component with no verified size is shown as a wireframe marker tile and
+// labelled as such — never drawn to an invented scale. Concept-only BOM
+// lines are not rendered at all (they stay in the BOM checklist).
+let deckInventoryItems = [];
+function buildDeckInventory() {
   if (!deckScene) return;
-  // Clear existing objects except lights and grid
   const toRemove = deckScene.children.filter(c => c.userData.deckObj);
   toRemove.forEach(o => deckScene.remove(o));
 
-  const col = new THREE.Color(deck.color);
-  function mat(hex, shine=50, rough=0.6) {
+  function mat(hex, shine=40) {
     return new THREE.MeshPhongMaterial({color: new THREE.Color(hex), shininess: shine});
   }
   function add(mesh) { mesh.userData.deckObj = true; deckScene.add(mesh); return mesh; }
-  function box(w,h,d,x,y,z,hex,shine) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat(hex,shine));
-    m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; return add(m);
+  function box(w, h, d, x, y, z, hex, shine) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(hex, shine));
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; return add(m);
   }
-  function cyl(r,h,x,y,z,hex,shine) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,20), mat(hex,shine));
-    m.position.set(x,y,z); m.castShadow=true; return add(m);
+  function label(text, x, y, z) {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 112;
+    const g = cv.getContext('2d');
+    g.fillStyle = 'rgba(6,10,16,.82)';
+    g.beginPath();
+    if (g.roundRect) g.roundRect(6, 6, 500, 100, 18); else g.rect(6, 6, 500, 100);
+    g.fill();
+    g.font = '600 40px system-ui, sans-serif'; g.fillStyle = '#e8eef7';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, 256, 58, 480);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false}));
+    const w = Math.max(34, text.length * 2.6);
+    sp.scale.set(w, w * 112 / 512, 1);
+    sp.position.set(x, y, z);
+    return add(sp);
   }
 
-  // ── Shared core: LiPo battery ──
-  box(50,8,20, -30,0,30, '#2a2a35', 20);           // battery pack
-  box(50,0.5,20, -30,4.3,30, col.getStyle(), 60);  // hat-color top strip
-  box(5,2,8, -4,4,30, '#888', 40);                 // JST connector
-
-  // ── Boost/charge board ──
-  box(28,2,18, 10,0,30, '#1a3a1a', 20);            // PCB
-  box(14,4,10, 10,2.5,30, '#111', 30);             // main IC block
-  box(5,6,5, 20,3,30, '#1a1a2a', 20);              // USB-C port
-  cyl(3,3, 2,3,30, '#888', 60);                    // cap
-
-  // ── Brain PCB (Waveshare 1.3" HAT 65×30mm) ──
-  box(65,1.6,30, 32,8,15, '#1b4a1b', 30);          // FR4
-  box(51,8.5,5.1, 25,10.5,3.5, '#0d0d14', 20);    // GPIO header
-  box(51,0.5,2, 25,17.5,3.5, '#c8a820', 120);     // gold pins
-  box(23.4,1.6,23.4, 12,10,15, '#9a9a9f', 80);    // display bezel
-  box(23.4,0.8,23.4, 12,11.4,15, '#04040a', 150); // screen
-  box(12,1.8,12, 40,10,15, '#1e1e24', 30);        // joystick base
-  cyl(2.4,5.5, 40,15.65,15, '#3c3c46', 50);       // joy nub
-  [8.5,15,21.5].forEach(bz => {
-    box(6,3.5,6, 55,10.75,bz, '#0e0e14', 20);     // button body
-    cyl(2.2,0.9, 55,13.2,bz, '#e8e8ea', 50);      // button cap
+  // ── Collect the component set from the design state (fact sources only) ──
+  const items = [];
+  const brain = brainById(designState.brainId);
+  if (brain) items.push({ name: brain.name, sub: 'main board',
+    w: brain.board_w_mm, d: brain.board_h_mm, h: 1.6, hex: '#2563eb', scaled: true });
+  if (currentSpec && currentSpec.board_width_mm) {
+    items.push({ name: currentSpec.model || 'Device board', sub: 'device (HAT)',
+      w: currentSpec.board_width_mm, d: currentSpec.board_height_mm, h: 1.6,
+      hex: '#16a34a', scaled: true,
+      screen: (currentSpec.display_width_mm && currentSpec.display_height_mm)
+        ? [currentSpec.display_width_mm, currentSpec.display_height_mm] : null });
+  }
+  const MOD_HEX = ['#a78bfa', '#f472b6', '#facc15', '#34d399', '#fb923c', '#38bdf8'];
+  let mi = 0;
+  (designState.moduleIds || []).forEach(mid => {
+    const m = moduleById(mid);
+    if (!m) return;
+    if (m.hat && currentSpec) return;   // the loaded device board IS the HAT
+    const fw = m.requires && m.requires.footprint_w_mm;
+    const fh = m.requires && m.requires.footprint_h_mm;
+    const hex = MOD_HEX[mi++ % MOD_HEX.length];
+    if (fw && fh) items.push({ name: m.name, sub: m.kind || 'module',
+      w: fw, d: fh, h: m.kind === 'camera' ? 3 : (m.hat ? 1.6 : 3),
+      hex, scaled: true, camera: m.kind === 'camera' });
+    else items.push({ name: m.name, sub: (m.kind || 'module') + ' · no verified size',
+      w: 14, d: 14, h: 1.2, hex: '#8a93a5', scaled: false });
   });
+  const pwr = powerById(designState.powerSourceId);
+  if (pwr && pwr.dims_mm) items.push({ name: pwr.name, sub: 'power',
+    w: pwr.dims_mm[0], d: pwr.dims_mm[1], h: pwr.dims_mm[2],
+    hex: '#d97706', scaled: true });
 
-  // ── Hat-specific addon modules ──
-  if (deck.id === 'white') {
-    box(40,2,25, 70,8,10, '#1a1a2a', 20);          // TFT 3.5"
-    box(80,2,30, 32,8,-20, '#111', 20);             // BBQ10 keyboard
-    cyl(3,15, 90,15,15, '#666', 30);               // GPS antenna
-  } else if (deck.id === 'red') {
-    box(20,2,15, 70,8,5, '#1a1a2a', 20);           // CC1101 PCB
-    cyl(4,22, 72,20,5, '#888', 40);                // sub-GHz antenna
-    box(25,3,25, 70,8,25, '#111', 20);             // PN532 NFC
-    box(10,2,10, 70,8,45, '#1a1a2a', 20);          // nRF24 module
-    cyl(2,18, 78,18,45, '#666', 30);               // 2.4GHz antenna
-  } else if (deck.id === 'blue') {
-    box(80,4,40, -10,8,-10, '#1a2a1a', 20);        // Pi 5 (larger board)
-    box(30,3,20, 80,8,10, '#111', 20);             // RTL-SDR
-    cyl(3,25, 92,20,10, '#888', 40);               // SDR antenna
-    box(60,1,10, 20,10,-15, '#222', 10);           // e-ink display
-    box(20,3,15, -10,8,35, '#111', 20);            // LAN tap
-  } else if (deck.id === 'purple') {
-    box(65,1.6,30, 32,8,-20, '#1b4a1b', 30);       // second PCB (ESP32 side)
-    box(25,3,15, -20,8,15, '#1a1a2a', 20);         // TFT attack side
-    box(25,1,20, 100,8,15, '#222', 10);            // e-ink defend side
-  } else if (deck.id === 'gray') {
-    cyl(3,25, 32,20,0, '#888', 40);                // LoRa antenna
-    cyl(3,10, 55,15,25, '#666', 30);               // GPS antenna
-    box(10,1,10, 10,10,15, '#111', 30);            // OLED
-    box(50,8,25, 32,0,15, '#111830', 20);          // T-Beam outline
-  } else if (deck.id === 'black') {
-    box(85,4,55, -15,8,-5, '#1a1a2a', 20);         // Pi 5 8GB
-    box(60,3,30, 85,8,0, '#111', 20);             // touchscreen
-    box(40,2,20, -20,8,50, '#1a2a1a', 20);        // GL.iNet router
-  } else if (deck.id === 'green') {
-    box(85,4,55, -15,8,-5, '#1a1a2a', 20);         // Pi 4/5
-    box(70,5,25, 60,8,0, '#111', 20);             // 5" HDMI display
-    // WS2812 LED strip (8 LEDs across top)
-    for (let i=0;i<8;i++) {
-      const ledC = i < 3 ? '#22c55e' : i < 6 ? '#f59e0b' : '#ef4444';
-      box(6,2,4, -15+i*8,12,-10, ledC, 100);
+  // ── Lay the components out separately, in a row on the ground ──
+  const GAP = 16;
+  const totalW = items.reduce((s, it) => s + it.w, 0) + GAP * Math.max(0, items.length - 1);
+  let x = -totalW / 2;
+  items.forEach(it => {
+    const cx = x + it.w / 2;
+    if (it.scaled) {
+      box(it.w, it.h, it.d, cx, it.h / 2, 0, it.hex, 35);
+      if (it.screen) box(it.screen[0], 0.9, it.screen[1], cx, it.h + 0.45, 0, '#0b0e14', 120);
+      if (it.camera) {
+        const lens = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 3.5, 20), mat('#1c1f26', 80));
+        lens.position.set(cx, it.h + 1.75, 0); lens.castShadow = true; add(lens);
+      }
+    } else {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(it.w, it.h, it.d),
+        new THREE.MeshBasicMaterial({color: new THREE.Color(it.hex), wireframe: true}));
+      m.position.set(cx, it.h / 2, 0); add(m);
     }
-  } else if (deck.id === 'yellow') {
-    box(32,3,22, 70,8,5, '#1a1a2a', 20);           // Cardputer
-    box(15,1,8, 70,10,25, '#333', 30);             // SOIC clip
-    box(20,2,15, 70,8,38, '#111', 20);             // CH341A
-    box(30,1.5,10, 10,8,45, '#1a2a1a', 20);       // breadboard
-  } else if (deck.id === 'orange') {
-    box(32,3,22, 70,8,5, '#1a1a2a', 20);           // ESP32 Cardputer
-    box(20,2,14, 70,8,30, '#111', 20);             // small TFT
-    cyl(5,8, 85,12,15, '#c8a820', 40);             // antenna
+    label(it.name.length > 30 ? it.name.slice(0, 29) + '…' : it.name,
+          cx, it.h + 13, 0);
+    x += it.w + GAP;
+  });
+  deckInventoryItems = items;
+
+  // Frame the whole spread (controls exist only once the deck renderer
+  // has initialised — same guard class as the pipeline's renderer fix)
+  const span = Math.max(totalW, 60);
+  if (deckControls && deckCamera) {
+    deckControls.target.set(0, 4, 0);
+    deckCamera.position.set(0, span * 0.52, span * 0.78);
+    deckControls.update();
   }
 
-  // ── Enclosure outline (hat-color accent frame) ──
-  const EW = deck.id==='blue'||deck.id==='black'||deck.id==='green' ? 160 : 110;
-  const EH = 50, ED = 80;
-  const edgeMat = new THREE.LineBasicMaterial({color: col, transparent: true, opacity: 0.5});
-  [[0,0],[EW,0],[EW,ED],[0,ED]].forEach(([ex,ez]) => {
-    const pts = [new THREE.Vector3(ex-10,-2,ez-10), new THREE.Vector3(ex-10,EH,ez-10)];
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), edgeMat);
-    line.userData.deckObj = true;
-    deckScene.add(line);
-  });
-
-  // Camera target
-  deckControls.target.set(EW/2, 10, ED/2);
-  deckCamera.position.set(EW/2 - 20, 80, ED + 100);
-  deckControls.update();
-
-  document.getElementById('deck-3d-label').textContent =
-    `Concept styling — ${deck.emoji} ${deck.label} · ${deck.bom.length} concept components · the Design tab shows your actual build`;
-  document.getElementById('deck-3d-label').style.color = deck.color;
+  const scaled = items.filter(i => i.scaled).length;
+  const markers = items.length - scaled;
+  const lbl = document.getElementById('deck-3d-label');
+  lbl.textContent = items.length
+    ? `Inventory — ${items.length} components rendered separately` +
+      ` · ${scaled} to scale` + (markers ? ` · ${markers} as markers (no verified size)` : '') +
+      (pwr && !pwr.dims_mm ? ' · wired power: no bay component' : '') +
+      ' · concept-only BOM lines are not rendered'
+    : 'Inventory — no components in the design yet: pick a main board to begin';
+  lbl.style.color = 'rgba(255,255,255,.55)';
 }
 
 function selectDeck(id) {
@@ -2311,7 +2303,7 @@ function selectDeck(id) {
   // Init deck renderer if needed, then build scene
   requestAnimationFrame(() => {
     if (!deckRenderer) initDeckRenderer();
-    buildDeckScene(deck);
+    buildDeckInventory();
   });
 
   // Also load brain PCB into the main 3D viewer — then fold the
@@ -2345,7 +2337,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   initThree();
   buildColourUI();
   renderHatDecks();
-  await Promise.all([loadKnownDevices(), loadHeaderVariants()]);
+  await loadHeaderVariants();
   refreshFiles();
   // Pre-load GPIO reference for client-side lookup
   fetch(API+'/api/gpio-map').then(r=>r.json()).then(d=>{
@@ -2355,30 +2347,14 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   }).catch(()=>{});
 });
 
-// ═══════════════════════════════════════════════════════
-//  Known devices
-// ═══════════════════════════════════════════════════════
-async function loadKnownDevices() {
-  const r = await fetch(API+'/api/known-devices');
-  const d = await r.json();
-  const el = document.getElementById('known-list');
-  el.innerHTML='';
-  Object.entries(d.devices).forEach(([key,dev])=>{
-    const item=document.createElement('div');
-    item.className='device-item';
-    item.innerHTML=`<div class="dn">${dev.model}</div>
-      <div class="dm">${dev.board_mm} mm · ${dev.display}</div>
-      <div style="margin-top:3px"><span class="tag tag-blue">${dev.interface}</span></div>`;
-    item.onclick=()=>{ document.querySelectorAll('.device-item').forEach(i=>i.classList.remove('active')); item.classList.add('active'); doCrawl(key); };
-    el.appendChild(item);
-  });
-}
 
 // ── Live search suggestions ────────────────────────────────────────────────
 // Framework R3a: onSearchInput() was REMOVED with the Lookup UI (the user's
 // audit cut arbitrary device lookup entirely). doCrawl() below remains, but
-// is now only ever called with verified registry keys (known HAT list,
-// Deck archetype brains, Feature Module HATs).
+// is now only ever called with verified registry keys (Deck archetype
+// brains, Feature Module HATs). The sidebar Known HATs list was removed
+// by the user's audit (Requirement 7): the Brain tab is where boards are
+// picked.
 
 async function loadHeaderVariants() {
   const r = await fetch(API+'/api/header-variants');
@@ -3786,6 +3762,7 @@ async function applyArchetypeMapping(deck){
     statusOk(`Archetype “${deck.label}” mapped into your design — ` + applied.join(' · '));
   }
   updateDesignTruthNote();
+  buildDeckInventory();
 }
 
 // The design selection sent to the report + report-images endpoints:
