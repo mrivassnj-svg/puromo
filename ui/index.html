@@ -1537,12 +1537,19 @@ function buildWiringDiagram(pinout) {
 
   // RPi header
   svgContent += `<text x="${rpiX}" y="20" fill="#8892a4" font-size="10" font-family="monospace">RPi GPIO (Physical)</text>`;
+  // Framework R2f: conflict locations are marked on the diagram itself,
+  // in the reserved conflict colour, at the physical pin where they occur.
+  const conflictPins = new Set((pinout.conflicts||[]).map(c=>c.gpio_key));
   gpioMap.slice(0,40).forEach((pin,i)=>{
     const y = rpiY + i * pinH;
     const fill = pin.claimed_by ? pin.claimed_by.colour : '#1c2030';
     const textFill = pin.claimed_by ? '#fff' : '#8892a4';
     svgContent += `<rect x="${rpiX}" y="${y}" width="${pinW}" height="${pinH-1}" rx="2" fill="${fill}" opacity="${pin.claimed_by?1:0.7}"/>`;
     svgContent += `<text x="${rpiX+4}" y="${y+8}" fill="${textFill}" font-size="7.5" font-family="monospace">P${String(pin.phys).padStart(2,'0')} ${pin.name}</text>`;
+    if (conflictPins.has(pin.gpio_key)) {
+      svgContent += `<rect x="${rpiX-3}" y="${y-1}" width="${pinW+6}" height="${pinH+1}" rx="3" fill="none" stroke="#ff2d78" stroke-width="1.8"/>`;
+      svgContent += `<text x="${rpiX+pinW+10}" y="${y+9}" fill="#ff2d78" font-size="10" font-weight="700">✕ conflict</text>`;
+    }
   });
 
   // Modules (right side)
@@ -1713,6 +1720,11 @@ function showTab(id,el) {
   if (id === 't-3d') {
     requestAnimationFrame(()=>{ ensureRenderer(); onResize(); });
   }
+  // Framework tabs refresh their content when opened
+  if (id === 't-header' && typeof renderHeaderTable === 'function') renderHeaderTable();
+  if (id === 't-modules' && typeof refreshModules === 'function') refreshModules();
+  if (id === 't-power' && typeof renderPowerSources === 'function') renderPowerSources();
+  if (id === 't-print' && typeof refreshOverlapGate === 'function') refreshOverlapGate();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2402,6 +2414,7 @@ async function computeGeometry() {
     currentGeom=d.geometry;
     buildShell3D(currentGeom);
     renderGeomTable(currentGeom);
+    refreshOverlapGate();
     statusOk('Geometry computed');
   } catch(e){ statusErr('Geometry error: '+e.message); }
 }
@@ -2499,13 +2512,16 @@ async function doPipeline() {
 
 function renderConflicts(conflicts) {
   const el=document.getElementById('conflict-list');
-  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>';return;}
-  el.innerHTML=conflicts.map(c=>`
+  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>';}
+  else el.innerHTML=conflicts.map(c=>`
     <div class="conflict-item">
       <b style="color:var(--red)">⚠ GPIO ${c.gpio_key} (BCM ${c.bcm}, Phys ${c.phys_pin})</b><br>
       <span>${c.conflict_between.join(' + ')}</span><br>
       <span style="color:var(--muted);font-size:.74rem">${c.note}</span>
     </div>`).join('');
+  // Framework R2e: every fresh pinout render is followed by the 5×
+  // verification + triage in the Wiring tab (silent if it cannot run).
+  if (typeof runPinoutVerify === 'function') runPinoutVerify(true);
 }
 
 function renderSpecs(specs) {
@@ -2960,6 +2976,9 @@ async function discoverPrinters() {
 }
 
 async function createPrintPackage() {
+  // Framework R5 safeguard: never package a design with unacknowledged
+  // marked overlaps.
+  if (!overlapGateCleared()) { statusErr('Overlap safeguard: acknowledge the marked overlaps in the Print tab first.'); jumpToTab('t-print'); return; }
   const key = document.getElementById('pkg-printer-key').value;
   statusBusy('Creating print package…');
   // Gather STL files from output listing
@@ -3016,6 +3035,9 @@ async function refreshPrintFileList() {
 }
 
 async function uploadAndPrint() {
+  // Framework R5 safeguard: never send a design with unacknowledged
+  // marked overlaps to the printer.
+  if (!overlapGateCleared()) { statusErr('Overlap safeguard: acknowledge the marked overlaps in the Print tab first.'); jumpToTab('t-print'); return; }
   const key      = document.getElementById('print-printer-key').value;
   const host     = document.getElementById('print-host').value;
   const filename = document.getElementById('print-file-select').value;
