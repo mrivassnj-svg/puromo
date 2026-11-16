@@ -1392,17 +1392,19 @@ function updatePipelineAlerts() {
   if (!el) return;
   if (!currentPinout) { el.innerHTML=''; return; }
   const conflicts = currentPinout.conflicts || [];
+  const shared = currentPinout.shared_buses || [];
+  const sharedTxt = shared.length ? ` · Shared bus pins (by design): ${shared.map(s=>`${s.gpio_key} ${s.role}`).join(', ')}` : '';
   const pb = currentPinout.power_budget || {};
   const pct = pb.grand_total_ma ? Math.round(pb.grand_total_ma / 4500 * 100) : 0;
   const powerWarn = pct > 80;
   if (!conflicts.length && !powerWarn) {
-    el.innerHTML = `<div class="card" style="border-color:rgba(34,197,94,.4)"><span style="color:var(--green);font-size:.8rem">✓ Pinout: no conflicts · Power: ${pb.grand_total_ma||'—'} mA (${pct}% of 4.5 A budget)</span></div>`;
+    el.innerHTML = `<div class="card" style="border-color:rgba(34,197,94,.4)"><span style="color:var(--green);font-size:.8rem">✓ Pinout: no conflicts${sharedTxt} · Power: ${pb.grand_total_ma||'—'} mA (${pct}% of 4.5 A budget)</span></div>`;
     return;
   }
   el.innerHTML = `<div class="card" style="border-color:rgba(239,68,68,.4)">
     ${conflicts.map(c=>`<div style="font-size:.8rem;color:var(--red)">⚠ Pinout conflict: GPIO ${c.gpio_key||''} (BCM ${c.bcm??'—'}, Phys ${c.phys_pin??'—'}) — ${(c.conflict_between||[]).join(' + ')}</div>`).join('')}
     ${powerWarn?`<div style="font-size:.8rem;color:var(--red)">⚠ Power budget: ${pb.grand_total_ma} mA is ${pct}% of the 4.5 A budget (recommended PSU ${pb.recommended_psu_a} A)</div>`:''}
-    <div style="font-size:.74rem;color:var(--muted)">Details in stage 3 → Pinout. Note: the backend reports shared SPI bus pins (e.g. GPIO10/11 MOSI/SCLK) as conflicts — that is the PinoutEngine's current behaviour, surfaced as-is.</div>
+    <div style="font-size:.74rem;color:var(--muted)">Details in stage 3 → Pinout. Shared SPI (MOSI/MISO/SCLK) and I2C (SDA/SCL) bus pins are not conflicts — devices on a bus are distinguished by chip-select or I2C address.${shared.length?` Shared here: ${shared.map(s=>`${s.gpio_key} ${s.role}`).join(', ')}.` : ''}</div>
   </div>`;
 }
 
@@ -1543,13 +1545,15 @@ async function doPipeline() {
 
 function renderConflicts(conflicts) {
   const el=document.getElementById('conflict-list');
-  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>';return;}
+  const shared=(typeof currentPinout !== 'undefined' && currentPinout && currentPinout.shared_buses) || [];
+  const sharedHtml=shared.length?`<div style="font-size:.78rem;color:var(--muted);margin-top:6px">Shared bus pins (by design, not conflicts): ${shared.map(s=>`${s.gpio_key} ${s.role} — ${(s.shared_by||[]).join(' + ')}`).join(' · ')}</div>`:'';
+  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>'+sharedHtml;return;}
   el.innerHTML=conflicts.map(c=>`
     <div class="conflict-item">
       <b style="color:var(--red)">⚠ GPIO ${c.gpio_key} (BCM ${c.bcm}, Phys ${c.phys_pin})</b><br>
       <span>${c.conflict_between.join(' + ')}</span><br>
       <span style="color:var(--muted);font-size:.74rem">${c.note}</span>
-    </div>`).join('');
+    </div>`).join('')+sharedHtml;
 }
 
 function renderSpecs(specs) {
