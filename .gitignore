@@ -37,6 +37,9 @@ output/cache/
 # Data cache
 data/devices/*.json
 
+# Server-side saved builds (user data, not source)
+data/saved_builds/*.json
+
 # IDE
 .vscode/
 .idea/

@@ -300,6 +300,10 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
       <canvas id="canvas2d" width="250" height="175" style="border:1px solid var(--border);border-radius:6px;background:#070a0f;display:block"></canvas>
     </div>
     <div class="card" style="grid-column:1/-1">
+      <h3>Fit / Tolerance Warnings</h3>
+      <div id="fit-warnings" style="font-size:.8rem;line-height:1.9;color:var(--muted)">Run stage 2 first.</div>
+    </div>
+    <div class="card" style="grid-column:1/-1">
       <h3>Assembly Notes</h3>
       <div id="asm-notes" style="font-size:.8rem;line-height:1.9;color:var(--muted)"></div>
     </div>
@@ -454,7 +458,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
       <label>Select Printer</label>
       <select id="pkg-printer-key"></select>
       <div class="btn-row">
-        <button class="btn btn-purple" onclick="createPrintPackage()">📦 Create Print Package</button>
+        <button class="btn btn-purple" onclick="createPrintPackage()">📦 Package for printer</button>
       </div>
       <div id="pkg-status" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
     </div>
@@ -569,7 +573,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
   </div>
   <div class="card" id="saved-builds-card">
     <h3>Saved Builds</h3>
-    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Save up to 3 named device configurations for quick recall.</p>
+    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Saved on the server (data/saved_builds/) — loadable from any browser or device that can reach this server. Replaces the old localStorage saves.</p>
     <div id="saved-builds-list" style="display:flex;flex-direction:column;gap:7px"></div>
     <div class="btn-row" style="margin-top:8px">
       <input id="save-slot-name" type="text" placeholder="Build name…" style="flex:1;min-width:0"/>
@@ -1369,6 +1373,44 @@ function renderGeomTable(g) {
     rows.map(r=>`<tr><td>${r[0]}</td><td style="font-family:monospace">${r[1]}</td></tr>`).join('')+'</tbody>';
   document.getElementById('asm-notes').innerHTML=
     (g.assembly_notes||[]).map(n=>`<div>• ${n}</div>`).join('') || '—';
+  renderWarnings(g);
+}
+
+function renderWarnings(g) {
+  const el = document.getElementById('fit-warnings');
+  if (!el) return;
+  const w = (g && g.warnings) || [];
+  el.innerHTML = w.length
+    ? w.map(x=>`<div class="conflict-item" style="background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3)">⚠ ${x}</div>`).join('')
+    : '<span style="color:var(--green)">✓ No fit/tolerance warnings from the dimension engine.</span>';
+}
+
+// Stepper-level alerts: pinout conflicts + power budget, visible on every
+// stage without opening the pinout panel.
+function updatePipelineAlerts() {
+  const el = document.getElementById('pipeline-alerts');
+  if (!el) return;
+  if (!currentPinout) { el.innerHTML=''; return; }
+  const conflicts = currentPinout.conflicts || [];
+  const pb = currentPinout.power_budget || {};
+  const pct = pb.grand_total_ma ? Math.round(pb.grand_total_ma / 4500 * 100) : 0;
+  const powerWarn = pct > 80;
+  if (!conflicts.length && !powerWarn) {
+    el.innerHTML = `<div class="card" style="border-color:rgba(34,197,94,.4)"><span style="color:var(--green);font-size:.8rem">✓ Pinout: no conflicts · Power: ${pb.grand_total_ma||'—'} mA (${pct}% of 4.5 A budget)</span></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="card" style="border-color:rgba(239,68,68,.4)">
+    ${conflicts.map(c=>`<div style="font-size:.8rem;color:var(--red)">⚠ Pinout conflict: GPIO ${c.gpio_key||''} (BCM ${c.bcm??'—'}, Phys ${c.phys_pin??'—'}) — ${(c.conflict_between||[]).join(' + ')}</div>`).join('')}
+    ${powerWarn?`<div style="font-size:.8rem;color:var(--red)">⚠ Power budget: ${pb.grand_total_ma} mA is ${pct}% of the 4.5 A budget (recommended PSU ${pb.recommended_psu_a} A)</div>`:''}
+    <div style="font-size:.74rem;color:var(--muted)">Details in stage 3 → Pinout. Note: the backend reports shared SPI bus pins (e.g. GPIO10/11 MOSI/SCLK) as conflicts — that is the PinoutEngine's current behaviour, surfaced as-is.</div>
+  </div>`;
+}
+
+function updateStage3Summary() {
+  const fil = currentSpecs?.bom_filament || {};
+  const ent = currentBuild?.entity_count;
+  setStageStatus(3, document.getElementById('stage-status-3')?.textContent === 'failed' ? 'failed' : 'done',
+    `Done. Entities: ${ent ?? '—'} · BOM + filament: ${fil.estimated_mass_g ?? '—'} g, $${fil.estimated_cost_usd ?? '—'}, ~${fil.estimated_print_hours ?? '—'} h (${fil.recommended_material || 'PETG'}). See Assembly panel below for the full BOM.`);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1980,7 +2022,7 @@ async function createPrintPackage() {
   if (!stls.length) {
     statusErr('No STL files found — generate 3D files first (Blender).');
     document.getElementById('pkg-status').textContent = 'No STL files in output/. Generate them first.';
-    return;
+    return false;
   }
 
   const r = await fetch(API+'/api/print/package', {
@@ -2001,8 +2043,10 @@ async function createPrintPackage() {
       `<a href="${API}/api/download/${zipName}" target="_blank" style="color:var(--accent)">Download ZIP</a>`;
     await refreshFiles();
     statusOk('Print package ready: '+zipName);
+    return true;
   } else {
     statusErr('Package error: '+(d.detail||''));
+    return false;
   }
 }
 
@@ -2167,96 +2211,78 @@ async function pollBlenderLog() {
 }
 
 // ═══════════════════════════════════════════════════════
-//  Device save-slots (localStorage, up to 3)
+//  Saved builds — server-side (/api/saved-builds, JSON in data/saved_builds/)
+//  (replaces the old localStorage saves, which were per-browser only)
 // ═══════════════════════════════════════════════════════
-const SAVE_KEY = 'handheld3d_saves';
-
-function getSaves() {
-  try { return JSON.parse(localStorage.getItem(SAVE_KEY)||'[]'); }
-  catch(e) { return []; }
-}
-
-function putSaves(arr) {
-  localStorage.setItem(SAVE_KEY, JSON.stringify(arr.slice(0,3)));
-}
-
-function saveBuild() {
+async function saveBuild() {
   if (!currentSpec) { statusErr('No spec loaded — run pipeline or select a device first.'); return; }
-  const name = document.getElementById('save-slot-name').value.trim() ||
-    currentSpec.model || 'Build';
-  const saves = getSaves().filter(s=>s.name!==name);
-  saves.unshift({
-    name,
-    spec:  currentSpec,
-    geom:  currentGeom,
-    build: currentBuild,
-    specs: currentSpecs,
-    pinout: currentPinout,
-    saved_at: new Date().toISOString(),
-  });
-  putSaves(saves);
-  document.getElementById('save-slot-name').value = '';
-  renderSavedBuilds();
-  statusOk(`Saved build: "${name}"`);
+  const name = document.getElementById('save-slot-name').value.trim() || currentSpec.model || 'Build';
+  try {
+    const r = await fetch(API+'/api/saved-builds', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, spec: currentSpec, geom: currentGeom, build: currentBuild, specs: currentSpecs, pinout: currentPinout})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'save failed');
+    document.getElementById('save-slot-name').value = '';
+    await renderSavedBuilds();
+    statusOk(`Saved build on server: "${name}"`);
+  } catch(e) { statusErr('Save failed: '+e.message); }
 }
 
-function loadSave(idx) {
-  const saves = getSaves();
-  const s = saves[idx];
-  if (!s) return;
-  currentSpec   = s.spec;
-  currentGeom   = s.geom;
-  currentBuild  = s.build;
-  currentSpecs  = s.specs;
-  currentPinout = s.pinout;
-  document.getElementById('spec-json').value = JSON.stringify(currentSpec||{}, null, 2);
-  if (currentGeom) {
-    buildShell3D(currentGeom);
-    renderGeomTable(currentGeom);
-  }
-  if (currentSpecs) renderSpecs(currentSpecs);
-  if (currentPinout) {
-    WIRE_COLOURS_JS = currentPinout.wire_colours||{};
-    renderGPIOMap(currentPinout.gpio_map||[]);
-    renderPinoutTables(currentPinout);
-    renderPowerBudget(currentPinout.power_budget);
-    renderSafety(currentPinout.safety_checklist||[]);
-    buildWiringDiagram(currentPinout);
-    renderConflicts(currentPinout.conflicts||[]);
-  }
-  statusOk(`Loaded build: "${s.name}"`);
+async function loadSave(name) {
+  try {
+    const r = await fetch(API+'/api/saved-builds/'+encodeURIComponent(name));
+    const s = await r.json();
+    if (!r.ok) throw new Error(s.detail || 'load failed');
+    currentSpec = s.spec; currentGeom = s.geom; currentBuild = s.build; currentSpecs = s.specs; currentPinout = s.pinout;
+    document.getElementById('spec-json').value = JSON.stringify(currentSpec||{}, null, 2);
+    if (currentGeom) { buildShell3D(currentGeom); renderGeomTable(currentGeom); }
+    if (currentSpecs) renderSpecs(currentSpecs);
+    if (currentPinout) {
+      WIRE_COLOURS_JS = currentPinout.wire_colours||{};
+      renderGPIOMap(currentPinout.gpio_map||[]);
+      renderPinoutTables(currentPinout);
+      renderPowerBudget(currentPinout.power_budget);
+      renderSafety(currentPinout.safety_checklist||[]);
+      buildWiringDiagram(currentPinout);
+      renderConflicts(currentPinout.conflicts||[]);
+      if (window.updatePipelineAlerts) updatePipelineAlerts();
+    }
+    statusOk(`Loaded build: "${s.name}"`);
+  } catch(e) { statusErr('Load failed: '+e.message); }
 }
 
-function deleteSave(idx) {
-  const saves = getSaves();
-  saves.splice(idx,1);
-  putSaves(saves);
-  renderSavedBuilds();
+async function deleteSave(name) {
+  try {
+    const r = await fetch(API+'/api/saved-builds/'+encodeURIComponent(name), {method:'DELETE'});
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.detail || 'delete failed'); }
+    await renderSavedBuilds();
+    statusOk(`Deleted build: "${name}"`);
+  } catch(e) { statusErr('Delete failed: '+e.message); }
 }
 
-function renderSavedBuilds() {
+async function renderSavedBuilds() {
   const el = document.getElementById('saved-builds-list');
-  const saves = getSaves();
+  if (!el) return;
+  let saves = [];
+  try { const r = await fetch(API+'/api/saved-builds'); saves = (await r.json()).builds || []; } catch(e) {}
   if (!saves.length) {
-    el.innerHTML = '<span style="font-size:.78rem;color:var(--muted)">No saved builds yet.</span>';
+    el.innerHTML = '<span style="font-size:.78rem;color:var(--muted)">No saved builds yet (server-side).</span>';
     return;
   }
-  el.innerHTML = saves.map((s,i)=>`
+  el.innerHTML = saves.map(s=>`
     <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:7px 10px">
       <div>
         <span style="font-weight:600;font-size:.8rem">${s.name}</span>
-        <span style="color:var(--muted);font-size:.7rem;margin-left:8px">${s.spec?.board_width_mm||'—'}×${s.spec?.board_height_mm||'—'}mm</span>
-        <div style="color:var(--muted);font-size:.7rem">${new Date(s.saved_at).toLocaleDateString()}</div>
+        <span style="color:var(--muted);font-size:.7rem;margin-left:8px">${s.board_mm||''}mm</span>
+        <div style="color:var(--muted);font-size:.7rem">${s.saved_at ? new Date(s.saved_at).toLocaleString() : ''}</div>
       </div>
       <div style="display:flex;gap:5px">
-        <button class="btn btn-secondary" style="padding:3px 8px;font-size:.72rem" onclick="loadSave(${i})">Load</button>
-        <button class="btn btn-red" style="padding:3px 8px;font-size:.72rem" onclick="deleteSave(${i})">✕</button>
+        <button class="btn btn-secondary" style="padding:3px 8px;font-size:.72rem" onclick="loadSave('${String(s.name).replace(/'/g,"\\'")}')">Load</button>
+        <button class="btn btn-red" style="padding:3px 8px;font-size:.72rem" onclick="deleteSave('${String(s.name).replace(/'/g,"\\'")}')">✕</button>
       </div>
     </div>`).join('');
 }
 
-// Render saved builds on DOMContentLoaded
-document.addEventListener('DOMContentLoaded', ()=>{ renderSavedBuilds(); });
 </script>
 </body>
 </html>
