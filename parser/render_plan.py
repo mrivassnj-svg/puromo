@@ -16,8 +16,11 @@ Core honesty rules (Requirement 6):
     hardware the design does not have (no HAT, no camera, wired power)
     never appear in any frame.
   * Images are keyed by design_hash — a stable hash of the canonical
-    spec + selection — so a stale image rendered for a DIFFERENT design
-    can never be embedded in this design's report.
+    DESIGN (the physical spec fields + the selection; see
+    canonical_design) — so a stale image rendered for a DIFFERENT
+    design can never be embedded in this design's report, and mere
+    provenance drift (how the spec was found, derived numbers, field
+    order) can never orphan the images of the SAME design.
 
 Frame model: one frame per assembly step. Steps map to cumulative
 object groups by title keywords (the step titles come from
@@ -149,14 +152,93 @@ def canonical_selection(spec: dict, selection: dict = None) -> dict:
     }
 
 
+# The spec fields that DEFINE the physical design — board identity,
+# dimensions, display, mounting, power/interface, header geometry,
+# tallest component, fitted components and controls. This list mirrors
+# crawler.device_crawler.DeviceSpec; a test asserts every DeviceSpec
+# field is either here or in NON_DESIGN_SPEC_FIELDS, so a future spec
+# field cannot silently fall out of (or into) the design identity.
+DESIGN_SPEC_FIELDS = [
+    "model", "vendor",
+    "board_width_mm", "board_height_mm", "board_thickness_mm",
+    "display_diagonal_inch", "display_width_mm", "display_height_mm",
+    "resolution_w", "resolution_h",
+    "mounting_hole_diameter_mm", "mounting_hole_positions_mm",
+    "voltage_v", "interface", "controller_ic",
+    "gpio_header_pitch_mm", "gpio_rows", "gpio_cols",
+    "gpio_header_variant", "gpio_header_above_mm",
+    "gpio_header_below_mm", "gpio_header_mated_gap_mm",
+    "tallest_component_mm", "tallest_component_label",
+    "installed_components",
+    "button_positions_mm", "joystick_center_mm", "joystick_diameter_mm",
+]
+
+# Spec fields that are NOT the design: crawl provenance (raw_specs —
+# its "query" string alone orphaned a full rendered image set on the
+# user's Pi, 2026-11-16: the same HAT reached as '1.3inch_lcd_hat'
+# vs '240x240_1.3_hat'), the source page, a list of OTHER compatible
+# boards, and numbers derived from design fields (ppi, pixel pitch).
+NON_DESIGN_SPEC_FIELDS = {
+    "raw_specs", "source_url", "compatible_boards",
+    "ppi", "pixel_pitch_mm",
+}
+
+# List fields whose element order carries no physical meaning.
+_ORDER_FREE_FIELDS = {
+    "mounting_hole_positions_mm", "button_positions_mm",
+    "installed_components",
+}
+
+
+def _norm_value(value):
+    """Normalise a value for design identity: integral floats become
+    ints (70.0 and 70 are the same millimetre), other floats round to
+    3 decimals (float noise is not a design change), strings are
+    stripped, containers recurse."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        rounded = round(value, 3)
+        return int(rounded) if float(rounded).is_integer() else rounded
+    if isinstance(value, dict):
+        return {k: _norm_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_norm_value(v) for v in value]
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def canonical_design(spec: dict, selection: dict = None) -> dict:
+    """The design itself, as a fixed-shape dict: the physical spec
+    fields (DESIGN_SPEC_FIELDS only — provenance and derived numbers
+    never enter) plus the canonical selection. Two spec dicts that
+    describe the same physical design produce the same canonical
+    design, however the spec was obtained."""
+    spec = spec or {}
+    design_spec = {}
+    for field in DESIGN_SPEC_FIELDS:
+        if field in spec:
+            value = _norm_value(spec[field])
+            if field in _ORDER_FREE_FIELDS and isinstance(value, list):
+                value = sorted(
+                    value,
+                    key=lambda v: json.dumps(v, sort_keys=True,
+                                             default=str))
+            design_spec[field] = value
+    return {"spec": design_spec,
+            "selection": canonical_selection(spec, selection)}
+
+
 def design_hash(spec: dict, selection: dict = None) -> str:
-    """Stable identity of a design: sha256 of the canonical
-    spec + selection JSON, truncated to 16 hex chars. Identical input
-    → identical hash; any design change → a different hash, so images
-    rendered for one design can never be looked up for another."""
-    payload = {"spec": spec,
-               "selection": canonical_selection(spec, selection)}
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+    """Stable identity of a design: sha256 of the canonical design
+    JSON, truncated to 16 hex chars. Identical DESIGN → identical
+    hash, even if the spec's provenance, derived numbers or field
+    order differ; any physical design change → a different hash, so
+    images rendered for one design can never be looked up for
+    another."""
+    blob = json.dumps(canonical_design(spec, selection),
+                      sort_keys=True, separators=(",", ":"),
                       default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -344,6 +426,7 @@ def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
     return {
         "version": 1,
         "design_hash": h,
+        "design": canonical_design(spec, selection),
         "model": spec.get("model"),
         "spec": spec,
         "geom": geom,
