@@ -1160,6 +1160,7 @@ function buildShell3D(geom) {
   });
 
   // Joystick hole in lid
+  const joy = geom.joystick_aperture;
   if (joy && joy.r > 0) {
     const jhole = new THREE.Mesh(new THREE.CylinderGeometry(joy.r||6, joy.r||6, LT+0.2, 24), mat('#050508'));
     jhole.position.set(joy.cx, lidY + LT/2, joy.cy);
