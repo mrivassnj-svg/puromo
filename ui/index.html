@@ -995,6 +995,57 @@ function buildShell3D(geom) {
   updateDimKV(geom);
 }
 
+// ═══════════════════════════════════════════════════════
+//  2D blueprint (top view) — draws into the stage-2 canvas
+// ═══════════════════════════════════════════════════════
+function draw2D(g) {
+  const c = document.getElementById('canvas2d');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W=c.width, H=c.height;
+  ctx.clearRect(0,0,W,H);
+  const sw=g.shell_width_mm, sh=g.shell_height_mm;
+  if (!sw || !sh) return;
+  const scale=Math.min((W-16)/sw,(H-16)/sh);
+  const ox=(W-sw*scale)/2, oy=(H-sh*scale)/2;
+  const mx=x=>ox+x*scale, my=y=>oy+(sh-y)*scale;
+  const cr=(g.corner_radius||3)*scale;
+
+  ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(mx(g.corner_radius||3),my(0));
+  ctx.lineTo(mx(sw-(g.corner_radius||3)),my(0));
+  ctx.arcTo(mx(sw),my(0),mx(sw),my(g.corner_radius||3),cr);
+  ctx.lineTo(mx(sw),my(sh-(g.corner_radius||3)));
+  ctx.arcTo(mx(sw),my(sh),mx(sw-(g.corner_radius||3)),my(sh),cr);
+  ctx.lineTo(mx(g.corner_radius||3),my(sh));
+  ctx.arcTo(mx(0),my(sh),mx(0),my(sh-(g.corner_radius||3)),cr);
+  ctx.lineTo(mx(0),my(g.corner_radius||3));
+  ctx.arcTo(mx(0),my(0),mx(g.corner_radius||3),my(0),cr);
+  ctx.closePath(); ctx.stroke();
+
+  const dc=g.display_cutout;
+  if(dc&&dc.w){
+    ctx.fillStyle='rgba(79,142,247,.2)';
+    ctx.fillRect(mx(dc.x),my(dc.y+dc.h),dc.w*scale,dc.h*scale);
+    ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=.8;
+    ctx.strokeRect(mx(dc.x),my(dc.y+dc.h),dc.w*scale,dc.h*scale);
+  }
+  ctx.strokeStyle='#7c5cd8';
+  (g.mounting_bosses||[]).forEach(b=>{
+    ctx.beginPath(); ctx.arc(mx(b.cx),my(b.cy),b.r*scale,0,Math.PI*2); ctx.stroke();
+  });
+  ctx.strokeStyle='#22c55e';
+  (g.button_apertures||[]).forEach(b=>{
+    ctx.beginPath(); ctx.arc(mx(b.cx),my(b.cy),b.r*scale,0,Math.PI*2); ctx.stroke();
+  });
+  const joy=g.joystick_aperture;
+  if(joy&&joy.r){
+    ctx.strokeStyle='#f59e0b';
+    ctx.beginPath(); ctx.arc(mx(joy.cx),my(joy.cy),joy.r*scale,0,Math.PI*2); ctx.stroke();
+  }
+}
+
 function updateDimKV(g) {
   const data = [
     ['Shell W',  (g.shell_width_mm||0)+' mm'],
