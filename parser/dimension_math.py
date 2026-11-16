@@ -97,13 +97,56 @@ class Circle:
 
 @dataclass
 class ShellGeometry:
-    """Complete computed shell geometry ready for the Blender generator."""
+    """
+    Complete computed shell geometry — the SINGLE SOURCE OF TRUTH for
+    geometry. Both the Three.js viewer (via /api/compute-geometry) and
+    blender_shell_gen.py (via a geometry JSON file written by main.py)
+    consume this dict; neither re-derives shell dimensions itself.
+    """
 
     # Outer shell envelope
     shell_width_mm:  float = 0.0
     shell_height_mm: float = 0.0
     shell_depth_mm:  float = 0.0
     corner_radius:   float = CORNER_RADIUS
+
+    # Shell construction constants (from the module constants above —
+    # emitted here so consumers never hardcode their own copies)
+    wall_thickness_mm: float = WALL_THICKNESS
+    floor_thickness_mm: float = BOTTOM_FLOOR       # bottom floor thickness
+    bottom_floor_thickness_mm: float = BOTTOM_FLOOR  # alias, same value
+    lid_thickness_mm: float = LID_THICKNESS
+    board_thickness_mm: float = 1.6
+    standoff_height_mm: float = STANDOFF_HEIGHT
+    standoff_od_mm: float = STANDOFF_OD
+    standoff_hole_diameter_mm: float = STANDOFF_HOLE_D
+    pcb_clearance_mm: float = PCB_CLEARANCE
+    snap_fit_depth_mm: float = SNAP_FIT_DEPTH
+    snap_fit_height_mm: float = SNAP_FIT_HEIGHT
+    rib_thickness_mm: float = RIB_THICKNESS
+    display_bezel_mm: float = DISPLAY_BEZEL
+    display_recess_depth_mm: float = DISPLAY_RECESS_DEPTH
+    component_clearance_mm: float = COMPONENT_CLEARANCE
+    button_aperture_clearance_mm: float = BUTTON_APERTURE_CLEAR
+
+    # GPIO header geometry (from the spec / header variant)
+    gpio_header_above_mm: float = 0.0
+    gpio_header_mated_gap_mm: float = 0.0
+    gpio_header_pitch_mm: float = 2.54
+    gpio_rows: int = 0
+    gpio_cols: int = 0
+    # Board-local (x, y) of the header's pin-1 corner. This is the existing
+    # RPi HAT convention both old consumers already used (7.1, 3.5); it now
+    # lives here so neither consumer hardcodes it.
+    gpio_header_position_mm: List[float] = field(default_factory=lambda: [7.1, 3.5])
+    tallest_component_mm: float = 0.0
+
+    # Depth stack that produced shell_depth_mm (named terms, in mm)
+    depth_breakdown: dict = field(default_factory=dict)
+
+    # Fit / tolerance warnings derived from the geometry (see
+    # DimensionMath._compute_warnings for the rules)
+    warnings: List[str] = field(default_factory=list)
 
     # PCB placement inside shell
     pcb_offset_x:    float = 0.0  # offset from inner-left wall
@@ -169,6 +212,7 @@ class DimensionMath:
         self._compute_snap_fits(g)
         self._compute_ribs(g)
         self._generate_assembly_notes(g)
+        self._compute_warnings(g)
         return g
 
     # -----------------------------------------------------------------------
@@ -215,6 +259,34 @@ class DimensionMath:
             + LID_THICKNESS,
             3
         )
+
+        # Emit every construction / header value consumers need, so the
+        # geometry dict alone is sufficient to build the shell.
+        g.board_thickness_mm       = bt
+        g.gpio_header_above_mm     = hat_above
+        g.gpio_header_mated_gap_mm = mated_gap
+        g.gpio_header_pitch_mm     = self._f("gpio_header_pitch_mm", 2.54)
+        g.gpio_rows                = self._i("gpio_rows")
+        g.gpio_cols                = self._i("gpio_cols")
+        hdr_pos = self.s.get("gpio_header_position_mm") or [7.1, 3.5]
+        g.gpio_header_position_mm  = [float(hdr_pos[0]), float(hdr_pos[1])]
+        g.tallest_component_mm     = tallest_comp
+        g.depth_breakdown = {
+            "floor_thickness_mm": BOTTOM_FLOOR,
+            "standoff_height_mm": STANDOFF_HEIGHT,
+            "host_pcb_thickness_mm": bt,
+            "gpio_header_mated_gap_mm": mated_gap,
+            "hat_pcb_thickness_mm": bt,
+            "above_hat_pcb_mm": above_hat_pcb,
+            "above_hat_terms": {
+                "gpio_header_above_mm": hat_above,
+                "tallest_component_mm": tallest_comp,
+                "component_clearance_mm": COMPONENT_CLEARANCE,
+                "rule": "max(header_above, tallest_component) + clearance",
+            },
+            "lid_thickness_mm": LID_THICKNESS,
+            "total_mm": g.shell_depth_mm,
+        }
 
         header_variant = self.s.get("gpio_header_variant", "standard_11mm")
         g.assembly_notes.append(
@@ -469,6 +541,76 @@ class DimensionMath:
             )
 
     # -----------------------------------------------------------------------
+    # Step 11: fit / tolerance warnings
+    #
+    # Every rule below is derived only from geometry/spec numbers and the
+    # existing module constants (WALL_THICKNESS, STANDOFF_OD, PCB_CLEARANCE,
+    # COMPONENT_CLEARANCE) — no new thresholds are invented:
+    #  1. Display present but cutout width/height <= 0 (display no larger
+    #     than twice the bezel lip).
+    #  2. A button aperture circle overlaps the display cutout rectangle.
+    #  3. The joystick aperture circle overlaps the display cutout rectangle.
+    #  4. A button or joystick aperture extends outside the shell envelope.
+    #  5. A mounting boss is closer to a shell edge than boss radius +
+    #     WALL_THICKNESS (the boss would break through the wall).
+    #  6. The header mated gap accounts for more than half the total shell
+    #     depth (depth is header-dominated; a lower-profile header would
+    #     shrink the shell more than any other change).
+    #  7. The tallest component is taller than the header housing above the
+    #     HAT PCB, so the component — not the header — sets lid clearance.
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _circle_rect_overlap(cx, cy, r, rect) -> bool:
+        if not rect or rect.w <= 0 or rect.h <= 0:
+            return False
+        nearest_x = max(rect.x, min(cx, rect.x + rect.w))
+        nearest_y = max(rect.y, min(cy, rect.y + rect.h))
+        return (cx - nearest_x) ** 2 + (cy - nearest_y) ** 2 < r ** 2
+
+    def _compute_warnings(self, g: ShellGeometry):
+        w = []
+        dw = self._f("display_width_mm")
+        dh = self._f("display_height_mm")
+        if (dw or dh) and (g.display_cutout.w <= 0 or g.display_cutout.h <= 0):
+            w.append(
+                "Display cutout is not positive: display "
+                f"{dw}×{dh} mm minus 2×{DISPLAY_BEZEL} mm bezel gives "
+                f"{g.display_cutout.w}×{g.display_cutout.h} mm."
+            )
+        for i, b in enumerate(g.button_apertures):
+            if self._circle_rect_overlap(b.cx, b.cy, b.r, g.display_cutout):
+                w.append(f"Button aperture {i + 1} at ({b.cx},{b.cy}) overlaps the display cutout.")
+            if b.cx - b.r < 0 or b.cy - b.r < 0 or b.cx + b.r > g.shell_width_mm or b.cy + b.r > g.shell_height_mm:
+                w.append(f"Button aperture {i + 1} at ({b.cx},{b.cy}) extends outside the shell envelope.")
+        joy = g.joystick_aperture
+        if joy and joy.r > 0:
+            if self._circle_rect_overlap(joy.cx, joy.cy, joy.r, g.display_cutout):
+                w.append(f"Joystick aperture at ({joy.cx},{joy.cy}) overlaps the display cutout.")
+            if joy.cx - joy.r < 0 or joy.cy - joy.r < 0 or joy.cx + joy.r > g.shell_width_mm or joy.cy + joy.r > g.shell_height_mm:
+                w.append(f"Joystick aperture at ({joy.cx},{joy.cy}) extends outside the shell envelope.")
+        boss_r = STANDOFF_OD / 2
+        for boss in g.mounting_bosses:
+            edge = min(boss.cx, boss.cy, g.shell_width_mm - boss.cx, g.shell_height_mm - boss.cy)
+            if edge < boss_r + WALL_THICKNESS:
+                w.append(
+                    f"Mounting boss at ({boss.cx},{boss.cy}) is {round(edge, 2)} mm from a shell edge, "
+                    f"less than boss radius + wall thickness ({boss_r + WALL_THICKNESS} mm)."
+                )
+        if g.shell_depth_mm and g.gpio_header_mated_gap_mm > 0.5 * g.shell_depth_mm:
+            w.append(
+                f"Shell depth is header-dominated: mated gap {g.gpio_header_mated_gap_mm} mm is "
+                f"more than half of the {g.shell_depth_mm} mm total depth."
+            )
+        if g.tallest_component_mm > g.gpio_header_above_mm:
+            w.append(
+                f"Tallest component ({g.tallest_component_mm} mm) is taller than the header above the "
+                f"HAT PCB ({g.gpio_header_above_mm} mm), so the component sets lid clearance "
+                f"(+{COMPONENT_CLEARANCE} mm clearance)."
+            )
+        g.warnings = w
+
+    # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
 
@@ -487,11 +629,22 @@ def waveshare_hat_math_summary(hat_key: str = "1.3inch_lcd_hat") -> dict:
     """
     Returns a full mathematical breakdown of a Waveshare LCD HAT's
     critical dimensions for 3D shell design.
+
+    Delegates ALL geometry to DimensionMath.compute() — this function used
+    to carry a third, simplified depth formula (20.4 mm for the 1.3" HAT);
+    the canonical DimensionMath total (32.0 mm for the standard header)
+    is the only depth now reported anywhere.
     """
     from crawler.device_crawler import WAVESHARE_LCD_HATS
     data = WAVESHARE_LCD_HATS.get(hat_key, {})
     if not data:
         return {"error": f"Unknown HAT key: {hat_key}"}
+
+    spec = dict(data)
+    spec["vendor"] = "waveshare"
+    geom = DimensionMath(spec).compute()
+    import dataclasses
+    gd = dataclasses.asdict(geom)
 
     rw  = data.get("resolution_w", 0)
     rh  = data.get("resolution_h", 0)
@@ -501,26 +654,10 @@ def waveshare_hat_math_summary(hat_key: str = "1.3inch_lcd_hat") -> dict:
     bw  = data.get("board_width_mm", 0)
     bh  = data.get("board_height_mm", 0)
 
-    pixel_pitch = round(dw / rw, 6) if (dw and rw) else 0
-    diag_px     = math.sqrt(rw**2 + rh**2) if (rw and rh) else 0
-    ppi         = round(diag_px / dia, 2) if dia else 0
-    diag_mm     = round(math.sqrt(dw**2 + dh**2), 4) if (dw and dh) else 0
-
-    shell_w = round(bw + 2 * PCB_CLEARANCE + 2 * WALL_THICKNESS, 3)
-    shell_h = round(bh + 2 * PCB_CLEARANCE + 2 * WALL_THICKNESS, 3)
-    shell_d = round(BOTTOM_FLOOR + STANDOFF_HEIGHT + 1.6 + WS_HAT_STACK_HEIGHT_MM + LID_THICKNESS, 3)
-
-    cutout_w = round(dw - 2 * DISPLAY_BEZEL, 3)
-    cutout_h = round(dh - 2 * DISPLAY_BEZEL, 3)
-
-    # Waveshare 1.3" HAT display centering on board
-    disp_cx_board = bw * 0.33
-    disp_cy_board = bh / 2.0
-    inner_cx = WALL_THICKNESS + PCB_CLEARANCE + disp_cx_board
-    inner_cy = WALL_THICKNESS + PCB_CLEARANCE + disp_cy_board
-
+    dc = geom.display_cutout
     return {
         "model": data.get("model"),
+        "geometry": gd,
         "pcb": {
             "width_mm":       bw,
             "height_mm":      bh,
@@ -528,21 +665,22 @@ def waveshare_hat_math_summary(hat_key: str = "1.3inch_lcd_hat") -> dict:
         },
         "display": {
             "diagonal_inch":   dia,
-            "diagonal_mm":     diag_mm,
+            "diagonal_mm":     geom.display_diagonal_mm,
             "active_area_mm":  f"{dw} × {dh}",
             "resolution_px":   f"{rw} × {rh}",
-            "pixel_pitch_mm":  pixel_pitch,
-            "ppi":             ppi,
+            "pixel_pitch_mm":  geom.pixel_pitch_mm,
+            "ppi":             geom.ppi,
         },
         "shell_envelope": {
-            "width_mm":  shell_w,
-            "height_mm": shell_h,
-            "depth_mm":  shell_d,
+            "width_mm":  geom.shell_width_mm,
+            "height_mm": geom.shell_height_mm,
+            "depth_mm":  geom.shell_depth_mm,
+            "depth_breakdown": geom.depth_breakdown,
         },
         "lid_display_cutout": {
-            "width_mm":          cutout_w,
-            "height_mm":         cutout_h,
-            "center_on_shell_mm": (round(inner_cx, 3), round(inner_cy, 3)),
+            "width_mm":          dc.w,
+            "height_mm":         dc.h,
+            "center_on_shell_mm": (round(dc.x + dc.w / 2, 3), round(dc.y + dc.h / 2, 3)),
             "recess_depth_mm":   DISPLAY_RECESS_DEPTH,
         },
         "mounting": {
@@ -557,13 +695,14 @@ def waveshare_hat_math_summary(hat_key: str = "1.3inch_lcd_hat") -> dict:
             "cols":      data.get("gpio_cols", 20),
             "total_pins": data.get("gpio_rows", 2) * data.get("gpio_cols", 20),
         },
+        "warnings": geom.warnings,
         "formulas_used": {
             "pixel_pitch":  "display_width_mm / resolution_w",
-            "ppi":          "sqrt(res_w^2 + res_h^2) / display_diagonal_inch",
+            "ppi":          "sqrt(res_w^2 + res_h^2) / display_diagonal_inch (canonical PPI definition)",
             "diag_mm":      "sqrt(display_width_mm^2 + display_height_mm^2)",
             "shell_width":  "board_width + 2*PCB_CLEARANCE + 2*WALL_THICKNESS",
             "shell_height": "board_height + 2*PCB_CLEARANCE + 2*WALL_THICKNESS",
-            "shell_depth":  "BOTTOM_FLOOR + STANDOFF_H + PCB_T + HAT_STACK_H + LID_T",
+            "shell_depth":  "floor + standoff + host_pcb + header_mated_gap + hat_pcb + max(header_above, tallest_component) + component_clearance + lid (see depth_breakdown)",
             "cutout_w":     "display_width_mm - 2*DISPLAY_BEZEL",
             "cutout_h":     "display_height_mm - 2*DISPLAY_BEZEL",
         },

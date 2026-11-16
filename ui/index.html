@@ -26,12 +26,12 @@ header .badge{color:var(--accent);font-size:.8rem;background:rgba(79,142,247,.1)
 .sb-section{padding:14px 16px;border-bottom:1px solid var(--border)}
 .sb-section h4{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.7px;
   color:var(--muted);margin-bottom:10px}
-.main{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.main{display:flex;flex-direction:column;min-height:0;overflow-y:auto;overflow-x:hidden}
 .tabs{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);overflow-x:auto}
 .tab{padding:10px 16px;cursor:pointer;font-size:.82rem;border-bottom:2px solid transparent;
   color:var(--muted);white-space:nowrap;transition:all .15s;user-select:none}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(79,142,247,.05)}
-.tab-pane{flex:1;overflow-y:auto;padding:18px}
+.tab-pane{flex:none;overflow:visible;padding:18px}
 label{font-size:.78rem;color:var(--muted);display:block;margin-bottom:4px;margin-top:9px}
 label:first-child{margin-top:0}
 input,select,textarea{width:100%;background:#0a0c12;border:1px solid var(--border);
@@ -74,14 +74,6 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 .safety-verify{background:rgba(245,158,11,.2);color:var(--yellow)}
 #viewport{width:100%;background:#070a0f;border-radius:8px;cursor:grab;display:block;min-height:360px}
 #viewport:active{cursor:grabbing}
-.colour-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
-.colour-swatch{width:100%;aspect-ratio:1;border-radius:6px;border:2px solid transparent;
-  cursor:pointer;transition:all .15s}
-.colour-swatch.active{border-color:#fff;transform:scale(1.1)}
-.colour-swatch:hover{transform:scale(1.05)}
-.part-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}
-.part-row:last-child{border-bottom:none}
-.part-name{font-size:.8rem;font-weight:600}
 .gpio-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;font-size:.72rem}
 .gpio-pin{display:flex;align-items:center;gap:5px;padding:4px 7px;border-radius:4px;background:var(--surface);border:1px solid var(--border)}
 .gpio-pin.claimed{border-color:transparent}
@@ -107,14 +99,20 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 .device-item .dn{font-size:.82rem;font-weight:600}
 .device-item .dm{font-size:.72rem;color:var(--muted)}
 .svg-wrap{overflow:auto;background:#07090f;border-radius:8px;padding:12px;border:1px solid var(--border)}
-/* Hat-color deck selector */
-.hat-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:6px;cursor:pointer;
-  margin-bottom:4px;border:1.5px solid transparent;transition:all .15s}
-.hat-item:hover{background:rgba(255,255,255,.04)}
-.hat-item.active{border-color:currentColor;background:rgba(255,255,255,.05)}
-.hat-dot{width:18px;height:18px;border-radius:50%;flex-shrink:0}
-.hat-name{font-size:.8rem;font-weight:600}
-.hat-sub{font-size:.7rem;color:var(--muted)}
+.stepper{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);overflow-x:auto;position:sticky;top:0;z-index:5}
+.step-btn{padding:10px 14px;cursor:pointer;font-size:.82rem;border-bottom:2px solid transparent;color:var(--muted);white-space:nowrap;user-select:none}
+.step-btn.active{color:var(--accent);border-bottom-color:var(--accent);background:rgba(79,142,247,.05)}
+.step-btn .st{font-size:.68rem;margin-left:5px}
+.stage-head{padding:14px 18px 0}
+.stage-head-inner{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.stage-title{font-size:.95rem;font-weight:700}
+.stage-summary{font-size:.78rem;color:var(--muted);flex:1;min-width:220px;line-height:1.6}
+.stage-status{padding:2px 9px;border-radius:9px;font-size:.7rem;font-weight:700;background:var(--border);color:var(--text)}
+.stage-status.running{background:rgba(245,158,11,.2);color:var(--yellow)}
+.stage-status.done{background:rgba(34,197,94,.18);color:var(--green)}
+.stage-status.failed{background:rgba(239,68,68,.18);color:var(--red)}
+.stage-status.skipped{background:rgba(245,158,11,.18);color:var(--yellow)}
+#pipeline-alerts{padding:10px 18px 0}
 </style>
 </head>
 <body>
@@ -128,9 +126,9 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <line x1="23" y1="22" x2="23" y2="23.6" stroke="#7c5cd8" stroke-width="1.2"/>
   </svg>
   <div>
-    <h1 style="letter-spacing:.5px">Puromo <span style="font-size:.85rem;color:var(--muted);font-weight:400">プロモ — Cyberdeck Builder</span></h1>
+    <h1 style="letter-spacing:.5px">Puromo <span style="font-size:.85rem;color:var(--muted);font-weight:400">プロモ — Handheld Shell Builder</span></h1>
   </div>
-  <span class="badge">9 Cyberdeck Archetypes · PCB Replicas · Blender STL · Firmware · Wiring · PDF</span>
+  <span class="badge">Crawler → Dimensions → Modular Build → Blender STL → Firmware → PDF Report → Print</span>
 </header>
 
 <div class="layout">
@@ -138,16 +136,12 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 <!-- ═══ SIDEBAR ═══ -->
 <aside class="sidebar">
 
-  <!-- Hat color deck selector -->
-  <div class="sb-section">
-    <h4>🎩 Cyberdeck Archetype</h4>
-    <div id="hat-deck-list"></div>
-  </div>
-
-  <!-- Known HATs (PCB brain for selected deck) -->
+  <!-- Known HATs -->
   <div class="sb-section">
     <h4>🧠 Brain PCB</h4>
     <div id="known-list"></div>
+    <label>Vendor</label>
+    <select id="q-vendor"><option value="waveshare">Waveshare</option><option value="adafruit">Adafruit</option><option value="sparkfun">SparkFun</option><option value="arduino">Arduino</option><option value="raspberrypi">Raspberry Pi</option></select>
     <div style="margin-top:7px">
       <input id="q-input" type="text" placeholder="Search other boards…"
         oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Enter')doCrawl()"
@@ -170,7 +164,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <label><input type="checkbox" id="inc-battery" style="width:auto;margin-right:5px"/>Battery Bay</label>
     <input id="bat-size" type="text" value="50,20,6" placeholder="W,H,D mm" style="margin-top:4px"/>
     <div class="btn-row">
-      <button class="btn btn-secondary" id="btn-pipeline" onclick="doPipeline()">▶ Run Pipeline</button>
+      <button class="btn btn-secondary" id="btn-pipeline" onclick="doPipeline()">▶ Run Pipeline (7 stages)</button>
     </div>
   </div>
 
@@ -194,48 +188,20 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
       </select>
       <label>Controller IC</label>
       <input id="cpb-ic" type="text" value="ST7789"/>
+      <label>Vendor</label>
+      <input id="cpb-vendor" type="text" value="custom"/>
       <div class="btn-row">
         <button class="btn btn-green" style="width:100%" onclick="applyCustomPCB()">✓ Apply</button>
       </div>
     </div>
   </div>
 
-  <!-- Shell colours -->
-  <div class="sb-section">
-    <h4>🎨 Shell Colour</h4>
-    <div id="colour-parts"></div>
-  </div>
-
-  <!-- 3D controls -->
+  <!-- 3D controls (plain rotate/zoom/pan only) -->
   <div class="sb-section">
     <h4>🧊 3D Controls</h4>
-    <div class="hint">Drag · Scroll · Right-drag pan</div>
+    <div class="hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
     <div class="btn-row" style="margin-top:8px">
-      <button class="btn btn-secondary" onclick="resetCamera()">↺ Reset</button>
-      <button class="btn btn-secondary" onclick="toggleExplode()">⬆ Explode</button>
-    </div>
-    <label>Render Mode</label>
-    <select id="render-mode" onchange="setRenderMode(this.value)">
-      <option value="solid">Solid</option>
-      <option value="wireframe">Wireframe</option>
-      <option value="xray">X-Ray</option>
-    </select>
-    <div class="btn-row">
-      <button class="btn btn-purple" onclick="generate3D()">🧊 Export STL</button>
-    </div>
-  </div>
-
-  <!-- Groq AI key -->
-  <div class="sb-section">
-    <h4>🤖 Groq AI Key</h4>
-    <div class="hint" style="margin-bottom:6px">Powers render briefs &amp; assembly narration.</div>
-    <input id="groq-key-input" type="password" placeholder="gsk_…"
-      style="font-family:monospace;font-size:.75rem;letter-spacing:.05em"
-      oninput="setGroqKey(this.value)"/>
-    <div id="groq-key-status" class="hint" style="margin-top:4px"></div>
-    <div class="btn-row" style="margin-top:6px">
-      <button class="btn btn-secondary" style="font-size:.72rem;padding:4px 9px"
-        onclick="testGroqKey()">Test connection</button>
+      <button class="btn btn-secondary" onclick="resetCamera()">↺ Reset Camera</button>
     </div>
   </div>
 
@@ -243,90 +209,58 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 
 <!-- ═══ MAIN ═══ -->
 <main class="main">
-<div class="tabs">
-  <div class="tab active"   onclick="showTab('t-deck',this)">🎩 Deck</div>
-  <div class="tab"          onclick="showTab('t-3d',this)">3D View</div>
-  <div class="tab"          onclick="showTab('t-spec',this)">Device Spec</div>
-  <div class="tab"          onclick="showTab('t-geom',this)">Geometry</div>
-  <div class="tab"          onclick="showTab('t-pinout',this)">Pinout</div>
-  <div class="tab"          onclick="showTab('t-wiring',this)">Wiring</div>
-  <div class="tab"          onclick="showTab('t-asm',this)">Assembly</div>
-  <div class="tab"          onclick="showTab('t-firmware',this)">Firmware</div>
-  <div class="tab"          onclick="showTab('t-report',this)">📄 Report</div>
-  <div class="tab"          onclick="showTab('t-print',this)">🖨 Print</div>
-  <div class="tab"          onclick="showTab('t-files',this)">Files</div>
+<div class="stepper">
+  <div class="step-btn active" onclick="showStage(1)">1. Crawl / Lookup<span class="st" id="step-dot-1"></span></div>
+  <div class="step-btn" onclick="showStage(2)">2. Dimensions<span class="st" id="step-dot-2"></span></div>
+  <div class="step-btn" onclick="showStage(3)">3. Modular Build<span class="st" id="step-dot-3"></span></div>
+  <div class="step-btn" onclick="showStage(4)">4. Blender STL<span class="st" id="step-dot-4"></span></div>
+  <div class="step-btn" onclick="showStage(5)">5. Firmware<span class="st" id="step-dot-5"></span></div>
+  <div class="step-btn" onclick="showStage(6)">6. PDF Report<span class="st" id="step-dot-6"></span></div>
+  <div class="step-btn" onclick="showStage(7)">7. Print<span class="st" id="step-dot-7"></span></div>
 </div>
-
-<!-- ── DECK VIEW ── -->
-<div id="t-deck" class="tab-pane" style="display:flex;flex-direction:column;gap:0;padding:0">
-
-  <!-- Hero bar -->
-  <div id="deck-hero" style="padding:14px 18px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0">
-    <div id="deck-hat-badge" style="width:44px;height:44px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem">?</div>
-    <div style="flex:1;min-width:0">
-      <div id="deck-title" style="font-size:.95rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">← Select an archetype</div>
-      <div id="deck-goal" style="font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
-      <div id="deck-render-brief" style="font-size:.72rem;color:var(--accent2);font-style:italic;margin-top:2px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical"></div>
-    </div>
-    <div id="deck-safety-badge" style="font-size:.7rem;color:var(--yellow);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);border-radius:4px;padding:3px 8px;white-space:nowrap;flex-shrink:0"></div>
-    <button class="btn btn-purple" style="font-size:.74rem;padding:5px 11px;flex-shrink:0" onclick="showTab('t-3d',document.querySelector('.tab[onclick*=\'t-3d\']'));ensureRenderer();onResize()">3D View →</button>
-  </div>
-
-  <!-- Two-column body -->
-  <div style="display:grid;grid-template-columns:1fr 380px;flex:1;min-height:0;overflow:hidden">
-
-    <!-- LEFT: 3D deck preview canvas -->
-    <div style="position:relative;background:#06080d;border-right:1px solid var(--border)">
-      <canvas id="deck-viewport" style="display:block;width:100%;height:100%;min-height:420px"></canvas>
-      <div style="position:absolute;top:10px;left:12px;font-size:.7rem;color:rgba(255,255,255,.25);pointer-events:none">Drag · Scroll · Right-drag pan</div>
-      <div id="deck-3d-label" style="position:absolute;bottom:10px;left:12px;font-size:.72rem;color:rgba(255,255,255,.3);pointer-events:none">Select a deck to preview</div>
-    </div>
-
-    <!-- RIGHT: tabbed detail panel -->
-    <div style="display:flex;flex-direction:column;overflow:hidden">
-      <!-- Mini tab bar -->
-      <div style="display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
-        <div class="deck-dtab active" onclick="showDeckDetail('dd-bom',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">📦 BOM</div>
-        <div class="deck-dtab" onclick="showDeckDetail('dd-wire',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">🔌 Wiring</div>
-        <div class="deck-dtab" onclick="showDeckDetail('dd-enc',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">📐 Enclosure</div>
-        <div class="deck-dtab" onclick="showDeckDetail('dd-safe',this)" style="padding:8px 14px;font-size:.74rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted)">⚠ Safety</div>
-      </div>
-
-      <!-- BOM checklist -->
-      <div id="dd-bom" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px">
-        <div style="font-size:.72rem;color:var(--muted);margin-bottom:8px">Check off parts as you source them.</div>
-        <div id="deck-bom-list"></div>
-        <div id="deck-bom-progress" style="margin-top:10px;font-size:.74rem;color:var(--muted)"></div>
-      </div>
-
-      <!-- Wiring SVG diagram -->
-      <div id="dd-wire" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px;display:none">
-        <div style="font-size:.72rem;color:var(--muted);margin-bottom:8px">Color key: <span style="color:#ef4444">■ PWR</span> <span style="color:#22c55e">■ GND</span> <span style="color:#3b82f6">■ SPI</span> <span style="color:#f59e0b">■ I2C</span> <span style="color:#a855f7">■ UART</span> <span style="color:#e8e8ea">■ USB/Other</span></div>
-        <svg id="deck-wire-svg" width="100%" viewBox="0 0 360 400" style="background:#06080d;border-radius:6px;border:1px solid var(--border)"></svg>
-      </div>
-
-      <!-- Enclosure sketch -->
-      <div id="dd-enc" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px;display:none">
-        <pre id="deck-enclosure" style="font-family:monospace;font-size:.77rem;color:var(--accent);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre;margin:0 0 10px 0"></pre>
-        <div id="deck-notes" style="font-size:.75rem;color:var(--muted);line-height:1.7"></div>
-      </div>
-
-      <!-- Safety -->
-      <div id="dd-safe" class="deck-detail" style="flex:1;overflow-y:auto;padding:12px;display:none">
-        <div id="deck-safety" style="font-size:.8rem;line-height:2.0">
-          <div style="color:var(--yellow);font-weight:700;margin-bottom:8px">⚠ Always verify before powering anything.</div>
-          <div style="color:var(--muted)">• Use only on gear you own, on isolated lab networks, or with written authorization.</div>
-          <div style="color:var(--muted)">• All logic is 3.3 V — never feed 5 V into GPIO pins.</div>
-          <div style="color:var(--muted)">• Never connect a LiPo directly to a Pi's 5 V pin; use a boost/charge board.</div>
-          <div style="color:var(--muted)">• Insulate the battery. Add a 1–2 A fuse between battery and boost board.</div>
-          <div style="color:var(--muted)">• Check radio-transmission regulations before enabling any transmit-capable module.</div>
-          <div style="color:var(--muted)">• Keep a written scope/authorization for any test on systems you don't own.</div>
-          <div id="deck-safety-specific" style="margin-top:10px;padding:10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:6px;color:var(--yellow);font-size:.78rem;line-height:1.8"></div>
-        </div>
-      </div>
-    </div><!-- end right panel -->
-  </div><!-- end grid -->
-</div>
+<div id="pipeline-alerts"></div>
+<div class="stage-head" id="stage-head-1" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">1. Crawl / Lookup</div>
+  <span class="stage-status" id="stage-status-1">not run</span>
+  <div class="stage-summary" id="stage-summary-1">Input: a known HAT, a search query + vendor, or custom PCB dimensions (sidebar). Output: a device spec JSON.</div>
+  <button class="btn btn-secondary" onclick="runStage(1)">↻ Re-run stage 1</button>
+</div></div>
+<div class="stage-head" id="stage-head-2" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">2. Dimensions</div>
+  <span class="stage-status" id="stage-status-2">not run</span>
+  <div class="stage-summary" id="stage-summary-2">Input: device spec. Output: backend ShellGeometry (single source of truth), 3D preview, 2D preview, fit/tolerance warnings.</div>
+  <button class="btn btn-secondary" onclick="runStage(2)">↻ Re-run stage 2</button>
+</div></div>
+<div class="stage-head" id="stage-head-3" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">3. Modular Build</div>
+  <span class="stage-status" id="stage-status-3">not run</span>
+  <div class="stage-summary" id="stage-summary-3">Input: spec + geometry. Output: modular build manifest, assembly specs, BOM + filament, pinout, wiring. (Pinout/wiring and assembly live here: they describe how the modular build is wired and assembled, and are produced by the build/spec/pinout calls in this stage.)</div>
+  <button class="btn btn-secondary" onclick="runStage(3)">↻ Re-run stage 3</button>
+</div></div>
+<div class="stage-head" id="stage-head-4" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">4. Blender STL</div>
+  <span class="stage-status" id="stage-status-4">not run</span>
+  <div class="stage-summary" id="stage-summary-4">Input: spec + backend geometry JSON. Output: STL / .blend files and the Blender log. Skipped (not failed) when Blender is not installed.</div>
+  <button class="btn btn-secondary" onclick="runStage(4)">↻ Re-run stage 4</button>
+</div></div>
+<div class="stage-head" id="stage-head-5" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">5. Firmware</div>
+  <span class="stage-status" id="stage-status-5">not run</span>
+  <div class="stage-summary" id="stage-summary-5">Input: spec. Output: generated firmware tree (14 Python files + README) and its architecture view.</div>
+  <button class="btn btn-secondary" onclick="runStage(5)">↻ Re-run stage 5</button>
+</div></div>
+<div class="stage-head" id="stage-head-6" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">6. PDF Report</div>
+  <span class="stage-status" id="stage-status-6">not run</span>
+  <div class="stage-summary" id="stage-summary-6">Input: spec + geometry + pinout + assembly specs. Output: PDF design report (cover + TOC + 10 numbered sections).</div>
+  <button class="btn btn-secondary" onclick="runStage(6)">↻ Re-run stage 6</button>
+</div></div>
+<div class="stage-head" id="stage-head-7" style="display:none"><div class="stage-head-inner">
+  <div class="stage-title">7. Print</div>
+  <span class="stage-status" id="stage-status-7">not run</span>
+  <div class="stage-summary" id="stage-summary-7">Input: STL files in output/ + a printer choice. Output: a single print-package ZIP. Run Pipeline never uploads to or starts a physical printer.</div>
+  <button class="btn btn-secondary" onclick="runStage(7)">↻ Re-run stage 7</button>
+</div></div>
 
 <!-- ── 3D VIEW ── -->
 <div id="t-3d" class="tab-pane" style="display:flex;flex-direction:column;gap:14px;padding:14px">
@@ -364,6 +298,10 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <div class="card">
       <h3>2D Top-Down Preview</h3>
       <canvas id="canvas2d" width="250" height="175" style="border:1px solid var(--border);border-radius:6px;background:#070a0f;display:block"></canvas>
+    </div>
+    <div class="card" style="grid-column:1/-1">
+      <h3>Fit / Tolerance Warnings</h3>
+      <div id="fit-warnings" style="font-size:.8rem;line-height:1.9;color:var(--muted)">Run stage 2 first.</div>
     </div>
     <div class="card" style="grid-column:1/-1">
       <h3>Assembly Notes</h3>
@@ -520,7 +458,7 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
       <label>Select Printer</label>
       <select id="pkg-printer-key"></select>
       <div class="btn-row">
-        <button class="btn btn-purple" onclick="createPrintPackage()">📦 Create Print Package</button>
+        <button class="btn btn-purple" onclick="createPrintPackage()">📦 Package for printer</button>
       </div>
       <div id="pkg-status" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
     </div>
@@ -633,9 +571,9 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
     <h3>Blender Log <span id="blender-log-status" style="font-size:.72rem;color:var(--muted)"></span></h3>
     <div id="log">—</div>
   </div>
-  <div class="card">
+  <div class="card" id="saved-builds-card">
     <h3>Saved Builds</h3>
-    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Save up to 3 named device configurations for quick recall.</p>
+    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Saved on the server (data/saved_builds/) — loadable from any browser or device that can reach this server. Replaces the old localStorage saves.</p>
     <div id="saved-builds-list" style="display:flex;flex-direction:column;gap:7px"></div>
     <div class="btn-row" style="margin-top:8px">
       <input id="save-slot-name" type="text" placeholder="Build name…" style="flex:1;min-width:0"/>
@@ -655,114 +593,11 @@ table.dt tr:hover td{background:rgba(79,142,247,.04)}
 const API = '';
 let currentSpec=null, currentGeom=null, currentBuild=null, currentSpecs=null, currentPinout=null;
 
-// ═══════════════════════════════════════════════════════
-//  Groq AI integration
-// ═══════════════════════════════════════════════════════
-function setGroqKey(val) {
-  if (val.trim()) {
-    sessionStorage.setItem('groq_api_key', val.trim());
-    window.GROQ_API_KEY = val.trim();
-    document.getElementById('groq-key-status').textContent = '✓ Key stored (session only)';
-    document.getElementById('groq-key-status').style.color = 'var(--green)';
-  }
-}
-
-// Restore key from session on load
-(function() {
-  const k = sessionStorage.getItem('groq_api_key');
-  if (k) {
-    window.GROQ_API_KEY = k;
-    const inp = document.getElementById('groq-key-input');
-    if (inp) inp.value = k;
-  }
-})();
-
-async function groqAsk(prompt, temp=0.5) {
-  const key = window.GROQ_API_KEY || sessionStorage.getItem('groq_api_key');
-  if (!key) return null;
-  try {
-    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        model: 'llama3-8b-8192',
-        temperature: temp,
-        max_tokens: 400,
-        messages: [{role: 'user', content: prompt}]
-      })
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(()=>({}));
-      console.warn('[Groq]', r.status, err?.error?.message || r.statusText);
-      return null;
-    }
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content?.trim() || null;
-  } catch(e) {
-    console.warn('[Groq] fetch error:', e);
-    return null;
-  }
-}
-
-async function testGroqKey() {
-  const statusEl = document.getElementById('groq-key-status');
-  const key = window.GROQ_API_KEY || sessionStorage.getItem('groq_api_key');
-  if (!key) {
-    statusEl.textContent = '✗ No key entered';
-    statusEl.style.color = 'var(--red)';
-    return;
-  }
-  statusEl.textContent = 'Testing…'; statusEl.style.color = 'var(--muted)';
-  try {
-    const r = await fetch('https://api.groq.com/openai/v1/models', {
-      headers: {'Authorization': 'Bearer ' + key}
-    });
-    if (r.ok) {
-      const d = await r.json();
-      const count = d.data?.length || '?';
-      statusEl.textContent = `✓ Connected — ${count} models available`;
-      statusEl.style.color = 'var(--green)';
-    } else {
-      const err = await r.json().catch(()=>({}));
-      statusEl.textContent = `✗ ${r.status}: ${err?.error?.message || r.statusText}`;
-      statusEl.style.color = 'var(--red)';
-    }
-  } catch(e) {
-    statusEl.textContent = '✗ Network error: ' + e.message;
-    statusEl.style.color = 'var(--red)';
-  }
-}
-
-async function groqRenderBrief(deck) {
-  const parts = deck.bom.slice(0, 5).map(b => b.part).join(', ');
-  const prompt = `In 2 sentences, describe the ideal lighting and camera angle for a photorealistic CGI render of a ${deck.label} cyberdeck (${deck.sub}) containing: ${parts}. Be specific about light temperature (Kelvin), shadow direction, and lens focal length. No preamble.`;
-  return await groqAsk(prompt, 0.7);
-}
-
-async function groqAssemblyNarration(deck) {
-  const parts = deck.bom.map((b,i) => `${i+1}. ${b.part}`).join('\n');
-  const prompt = `Write ${deck.bom.length} numbered assembly steps for building the ${deck.label} cyberdeck. Use these parts:\n${parts}\nEach step is one sentence. Focus on physical assembly order. No preamble.`;
-  return await groqAsk(prompt, 0.3);
-}
 let currentMdFile=null, currentJsonFile=null;
 let headerVariants={};
-let exploded=false;
 
-// Shell part colours (defaults)
-const SHELL_PARTS = {
-  bottom: { label:'Bottom Case',   colour:'#1a2a4a' },
-  lid:    { label:'Lid / Top Case', colour:'#1e3a5f' },
-  button: { label:'Button Caps',   colour:'#c0392b' },
-  grip:   { label:'Grip Panels',   colour:'#2d2d2d' },
-  stand:  { label:'Standoffs',     colour:'#b8860b' },
-};
-const PALETTE = [
-  '#1a2a4a','#1e3a5f','#2d4a2d','#4a2d2d','#2d2d4a',
-  '#c0392b','#e67e22','#27ae60','#8e44ad','#2980b9',
-  '#ecf0f1','#2c3e50','#1abc9c','#f39c12','#d35400',
-  '#16a085','#8e44ad','#2ecc71','#e74c3c','#3498db',
-];
-
+// Fixed shell colours (per-part colour picker was removed — see README removals)
+const PART_COLOURS = { bottom:'#1a2a4a', lid:'#1e3a5f', stand:'#b8860b' };
 // ═══════════════════════════════════════════════════════
 //  Three.js 3D Renderer
 // ═══════════════════════════════════════════════════════
@@ -850,40 +685,6 @@ function resetCamera() {
   controls.update();
 }
 
-function setRenderMode(mode) {
-  Object.values(shellObjects).forEach(obj=>{
-    if (!obj) return;
-    obj.traverse(c=>{
-      if (c.isMesh) {
-        if (mode==='wireframe') {
-          c.material.wireframe=true; c.material.opacity=1; c.material.transparent=false;
-        } else if (mode==='xray') {
-          c.material.wireframe=false; c.material.opacity=0.3; c.material.transparent=true;
-        } else {
-          c.material.wireframe=false; c.material.opacity=1; c.material.transparent=false;
-        }
-      }
-    });
-  });
-}
-
-let explodeT=0;
-function toggleExplode() {
-  exploded = !exploded;
-  const target = exploded ? 15 : 0;
-  if (shellObjects.lid) {
-    const startY = shellObjects.lid.position.y;
-    const delta = target - startY;
-    let t=0;
-    const anim = setInterval(()=>{
-      t+=0.05;
-      if(t>=1){clearInterval(anim);t=1;}
-      const ease = t<0.5 ? 2*t*t : -1+(4-2*t)*t;
-      shellObjects.lid.position.y = startY + delta*ease;
-    }, 16);
-  }
-}
-
 // Build the 3D shell from geometry data — exploded assembly view so PCB is always visible
 function buildShell3D(geom) {
   // Clear old shell
@@ -891,17 +692,25 @@ function buildShell3D(geom) {
   shellObjects = {};
 
   if (!geom) return;
+  // Geometry is the single source of truth: every shell dimension below
+  // comes from the backend geometry dict. No local defaults — a missing
+  // field is an error, not a silent divergent value.
+  const REQUIRED = ['shell_width_mm','shell_height_mm','shell_depth_mm','board_width_mm','board_height_mm',
+    'wall_thickness_mm','floor_thickness_mm','lid_thickness_mm','board_thickness_mm','standoff_height_mm',
+    'pcb_offset_x','pcb_offset_y','gpio_header_position_mm'];
+  const missing = REQUIRED.filter(k=>geom[k]===undefined||geom[k]===null);
+  if (missing.length) { statusErr('Geometry is missing fields from the backend: '+missing.join(', ')+'. Re-run stage 2.'); return; }
 
-  const W   = geom.shell_width_mm  || 70;
-  const H   = geom.shell_height_mm || 35;
-  const D   = geom.shell_depth_mm  || 20;
-  const BW  = geom.board_width_mm  || 65;
-  const BH  = geom.board_height_mm || 30;
-  const WT  = 2.0;   // wall thickness
-  const FT  = 2.5;   // floor thickness
-  const LT  = 1.8;   // lid thickness
-  const BT  = 1.6;   // board thickness
-  const SOH = 3.0;   // standoff height
+  const W   = geom.shell_width_mm;
+  const H   = geom.shell_height_mm;
+  const D   = geom.shell_depth_mm;
+  const BW  = geom.board_width_mm;
+  const BH  = geom.board_height_mm;
+  const WT  = geom.wall_thickness_mm;
+  const FT  = geom.floor_thickness_mm;
+  const LT  = geom.lid_thickness_mm;
+  const BT  = geom.board_thickness_mm;
+  const SOH = geom.standoff_height_mm;
   // Explode gap — lifts the lid clear so the PCB layer is fully visible
   const EXPLODE = D * 0.65;
 
@@ -916,7 +725,7 @@ function buildShell3D(geom) {
   const splitY = D - LT - 1;   // parting line height
 
   // Floor plate
-  const bottomObj = new THREE.Mesh(new THREE.BoxGeometry(W, FT, H), mat(SHELL_PARTS.bottom.colour));
+  const bottomObj = new THREE.Mesh(new THREE.BoxGeometry(W, FT, H), mat(PART_COLOURS.bottom));
   bottomObj.position.set(W/2, FT/2, H/2);
   scene.add(bottomObj);
   shellObjects.bottom = bottomObj;
@@ -930,7 +739,7 @@ function buildShell3D(geom) {
     [WT,  wallH, H-2*WT, WT/2,     FT+wallH/2,  H/2     ],  // left
     [WT,  wallH, H-2*WT, W-WT/2,   FT+wallH/2,  H/2     ],  // right
   ].forEach(([ww,wh,wd,px,py,pz])=>{
-    wallGroup.add(new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd), mat(SHELL_PARTS.bottom.colour)));
+    wallGroup.add(new THREE.Mesh(new THREE.BoxGeometry(ww,wh,wd), mat(PART_COLOURS.bottom)));
     wallGroup.children[wallGroup.children.length-1].position.set(px,py,pz);
   });
   scene.add(wallGroup);
@@ -938,8 +747,8 @@ function buildShell3D(geom) {
 
   // ── PCB layer — always visible, positioned using exact spec coordinates ──
   // pcb_offset_x/y from geometry = wall_thickness + pcb_clearance = exact shell-local origin of PCB corner
-  const OX = geom.pcb_offset_x || (WT + 0.5);   // PCB left edge in shell X
-  const OZ = geom.pcb_offset_y || (WT + 0.5);   // PCB front edge in shell Z
+  const OX = geom.pcb_offset_x;   // PCB left edge in shell X (from backend geometry)
+  const OZ = geom.pcb_offset_y;   // PCB front edge in shell Z
   const pcbY = FT + SOH;                         // bottom face of PCB
 
   // FR4 board — exact board dimensions, copper-green colour
@@ -967,12 +776,12 @@ function buildShell3D(geom) {
   const bossGroup = new THREE.Group();
   (geom.mounting_bosses||[]).forEach(b=>{
     // Annular copper ring on PCB
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry((b.r||2.5)+1.0, (b.r||2.5)+1.0, 0.1, 20), mat('#b87333', 1.0, 80));
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry((b.r)+1.0, (b.r)+1.0, 0.1, 20), mat('#b87333', 1.0, 80));
     ring.position.set(b.cx, pcbY+BT+0.05, b.cy);
     bossGroup.add(ring);
     // Standoff pillar
-    const bg = new THREE.CylinderGeometry(b.r||2.5, b.r||2.5, SOH, 20);
-    const bm = new THREE.Mesh(bg, mat(SHELL_PARTS.stand.colour));
+    const bg = new THREE.CylinderGeometry(b.r, b.r, SOH, 20);
+    const bm = new THREE.Mesh(bg, mat(PART_COLOURS.stand));
     bm.position.set(b.cx, FT + SOH/2, b.cy);
     bossGroup.add(bm);
   });
@@ -987,8 +796,8 @@ function buildShell3D(geom) {
   // Use exact display dimensions from spec; position from display_cutout (already shell-coord)
   // display_cutout.x/y is the shell-coord of the cutout — the display sits directly below it
   const dc = geom.display_cutout;
-  const DW = geom.display_width_mm  || (dc ? dc.w + 1.6 : 23.4);
-  const DH = geom.display_height_mm || (dc ? dc.h + 1.6 : 23.4);
+  const DW = geom.display_width_mm  || (dc ? dc.w + 2*(geom.display_bezel_mm||0) : 0);
+  const DH = geom.display_height_mm || (dc ? dc.h + 2*(geom.display_bezel_mm||0) : 0);
   if (DW > 0) {
     // Display is on the left third of board (Waveshare HAT layout)
     // display_cutout center maps back to board: cx = dc.x + dc.w/2
@@ -1029,8 +838,8 @@ function buildShell3D(geom) {
   const HDR_D  = hdrRows * hdrPitch;             // 5.08mm
   const HDR_H  = geom.gpio_header_above_mm || 8.5;
   // RPi HAT spec: header starts at board (7.1mm, 3.5mm) — GPIO pin 1 corner
-  const HDR_BX = 7.1;    // board-local X
-  const HDR_BZ = 3.5;    // board-local Z
+  const HDR_BX = geom.gpio_header_position_mm[0];    // board-local X, from backend geometry
+  const HDR_BZ = geom.gpio_header_position_mm[1];    // board-local Z
   const hdr = new THREE.Mesh(new THREE.BoxGeometry(HDR_W, HDR_H, HDR_D), mat('#0d0d14', 1.0, 20));
   hdr.position.set(OX + HDR_BX + HDR_W/2, compY + HDR_H/2, OZ + HDR_BZ + HDR_D/2);
   compGroup.add(hdr);
@@ -1137,7 +946,7 @@ function buildShell3D(geom) {
   const lidGroup = new THREE.Group();
 
   // Lid plate
-  const lidBase = new THREE.Mesh(new THREE.BoxGeometry(W, LT, H), mat(SHELL_PARTS.lid.colour));
+  const lidBase = new THREE.Mesh(new THREE.BoxGeometry(W, LT, H), mat(PART_COLOURS.lid));
   lidBase.position.set(W/2, lidY + LT/2, H/2);
   lidGroup.add(lidBase);
 
@@ -1154,15 +963,16 @@ function buildShell3D(geom) {
 
   // Button holes in lid
   (geom.button_apertures||[]).forEach(b=>{
-    const bhole = new THREE.Mesh(new THREE.CylinderGeometry(b.r||2, b.r||2, LT+0.2, 16), mat('#050508'));
+    const bhole = new THREE.Mesh(new THREE.CylinderGeometry(b.r, b.r, LT+0.2, 16), mat('#050508'));
     bhole.position.set(b.cx, lidY + LT/2, b.cy);
     lidGroup.add(bhole);
   });
 
-  // Joystick hole in lid
-  if (joy && joy.r > 0) {
-    const jhole = new THREE.Mesh(new THREE.CylinderGeometry(joy.r||6, joy.r||6, LT+0.2, 24), mat('#050508'));
-    jhole.position.set(joy.cx, lidY + LT/2, joy.cy);
+  // Joystick hole in lid (was a bug: it referenced an undefined `joy`)
+  const joyAperture = geom.joystick_aperture;
+  if (joyAperture && joyAperture.r > 0) {
+    const jhole = new THREE.Mesh(new THREE.CylinderGeometry(joyAperture.r, joyAperture.r, LT+0.2, 24), mat('#050508'));
+    jhole.position.set(joyAperture.cx, lidY + LT/2, joyAperture.cy);
     lidGroup.add(jhole);
   }
 
@@ -1198,103 +1008,6 @@ function updateDimKV(g) {
   ];
   document.getElementById('dim-kv').innerHTML =
     data.map(([k,v])=>`<div class="kv-k">${k}</div><div class="kv-v">${v}</div>`).join('');
-}
-
-// Apply colour to shell part
-function applyColour(partKey, hex) {
-  SHELL_PARTS[partKey].colour = hex;
-  const obj = shellObjects[partKey] || shellObjects[partKey==='bottom'?'walls':partKey];
-  const updateMat = o => { if(o) o.traverse(c=>{if(c.isMesh) c.material.color.set(hex);})};
-  if (partKey==='bottom') {
-    updateMat(shellObjects.bottom);
-    updateMat(shellObjects.walls);
-  } else if (partKey==='lid') {
-    if(shellObjects.lid) shellObjects.lid.children[0].material.color.set(hex);
-  } else if (partKey==='button') {
-    updateMat(shellObjects.buttons);
-    if(shellObjects.joystick) shellObjects.joystick.material.color.set(hex);
-  } else if (partKey==='stand') {
-    updateMat(shellObjects.bosses);
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-//  2D Canvas preview
-// ═══════════════════════════════════════════════════════
-function draw2D(g) {
-  const c = document.getElementById('canvas2d');
-  const ctx = c.getContext('2d');
-  const W=c.width, H=c.height;
-  ctx.clearRect(0,0,W,H);
-  const sw=g.shell_width_mm, sh=g.shell_height_mm;
-  const scale=Math.min((W-16)/sw,(H-16)/sh);
-  const ox=(W-sw*scale)/2, oy=(H-sh*scale)/2;
-  const mx=x=>ox+x*scale, my=y=>oy+(sh-y)*scale;
-  const cr=(g.corner_radius||3)*scale;
-
-  ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=1.5;
-  ctx.beginPath();
-  ctx.moveTo(mx(g.corner_radius||3),my(0));
-  ctx.lineTo(mx(sw-(g.corner_radius||3)),my(0));
-  ctx.arcTo(mx(sw),my(0),mx(sw),my(g.corner_radius||3),cr);
-  ctx.lineTo(mx(sw),my(sh-(g.corner_radius||3)));
-  ctx.arcTo(mx(sw),my(sh),mx(sw-(g.corner_radius||3)),my(sh),cr);
-  ctx.lineTo(mx(g.corner_radius||3),my(sh));
-  ctx.arcTo(mx(0),my(sh),mx(0),my(sh-(g.corner_radius||3)),cr);
-  ctx.lineTo(mx(0),my(g.corner_radius||3));
-  ctx.arcTo(mx(0),my(0),mx(g.corner_radius||3),my(0),cr);
-  ctx.closePath(); ctx.stroke();
-
-  const dc=g.display_cutout;
-  if(dc&&dc.w){
-    ctx.fillStyle='rgba(79,142,247,.2)';
-    ctx.fillRect(mx(dc.x),my(dc.y+dc.h),dc.w*scale,dc.h*scale);
-    ctx.strokeStyle='#4f8ef7'; ctx.lineWidth=.8;
-    ctx.strokeRect(mx(dc.x),my(dc.y+dc.h),dc.w*scale,dc.h*scale);
-  }
-  ctx.strokeStyle='#7c5cd8';
-  (g.mounting_bosses||[]).forEach(b=>{
-    ctx.beginPath(); ctx.arc(mx(b.cx),my(b.cy),b.r*scale,0,Math.PI*2); ctx.stroke();
-  });
-  ctx.strokeStyle='#22c55e';
-  (g.button_apertures||[]).forEach(b=>{
-    ctx.beginPath(); ctx.arc(mx(b.cx),my(b.cy),b.r*scale,0,Math.PI*2); ctx.stroke();
-  });
-  const joy=g.joystick_aperture;
-  if(joy&&joy.r){
-    ctx.strokeStyle='#f59e0b';
-    ctx.beginPath(); ctx.arc(mx(joy.cx),my(joy.cy),joy.r*scale,0,Math.PI*2); ctx.stroke();
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-//  Colour UI
-// ═══════════════════════════════════════════════════════
-function buildColourUI() {
-  const el = document.getElementById('colour-parts');
-  el.innerHTML = '';
-  Object.entries(SHELL_PARTS).forEach(([key,part])=>{
-    const row = document.createElement('div');
-    row.className = 'part-row';
-    row.innerHTML = `<span class="part-name">${part.label}</span>
-      <div style="display:flex;gap:5px;align-items:center">
-        <div style="width:20px;height:20px;border-radius:4px;background:${part.colour};border:1px solid rgba(255,255,255,.2);cursor:pointer"
-          onclick="openColourPicker('${key}',this)" id="swatch-${key}"></div>
-        <input type="color" value="${part.colour}" style="width:0;height:0;opacity:0;position:absolute"
-          id="cp-${key}" onchange="pickColour('${key}',this.value)"/>
-      </div>`;
-    el.appendChild(row);
-  });
-}
-
-function openColourPicker(key) {
-  document.getElementById('cp-'+key).click();
-}
-
-function pickColour(key, hex) {
-  SHELL_PARTS[key].colour = hex;
-  document.getElementById('swatch-'+key).style.background = hex;
-  applyColour(key, hex);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1357,8 +1070,7 @@ function buildWiringDiagram(pinout) {
           const y1 = rpiY + srcPinIdx*pinH + pinH/2;
           const x2 = modX;
           const y2 = ry + (pinH-1)/2;
-          const cx = (x1+x2)/2;
-          wirePaths.push(`<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}"
+          wirePaths.push(`<path d="M${x1},${y1} L${x2},${y2}"
             fill="none" stroke="${colFill}" stroke-width="1.4" opacity=".75"
             marker-end="url(#arrowhead)"/>
             <circle cx="${x1}" cy="${y1}" r="2.5" fill="${colFill}"/>
@@ -1492,611 +1204,43 @@ function statusOk(m){status(m,'var(--green)');}
 function statusErr(m){status(m,'var(--red)');}
 function statusBusy(m){status(m,'var(--yellow)');}
 
-function showTab(id,el) {
+const PANE_STAGE = {'t-spec':1,'t-3d':2,'t-geom':2,'t-pinout':3,'t-wiring':3,'t-asm':3,'t-files':4,'t-firmware':5,'t-report':6,'t-print':7};
+let currentStage = 1;
+function showStage(n) {
+  currentStage = n;
   document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById(id).style.display='';
-  if(el) el.classList.add('active');
-  // Boot the WebGL renderer the first time the 3D tab becomes visible
-  if (id === 't-3d') {
-    requestAnimationFrame(()=>{ ensureRenderer(); onResize(); });
-  }
+  document.querySelectorAll('.stage-head').forEach(h=>h.style.display='none');
+  const head = document.getElementById('stage-head-'+n);
+  if (head) head.style.display='';
+  Object.entries(PANE_STAGE).filter(([,s])=>s===n).forEach(([id])=>{
+    const el = document.getElementById(id); if (el) el.style.display='';
+  });
+  document.querySelectorAll('.step-btn').forEach((b,i)=>b.classList.toggle('active', i===n-1));
+  if (n === 2) requestAnimationFrame(()=>{ ensureRenderer(); onResize(); });
+  const main = document.querySelector('.main'); if (main) main.scrollTop = 0;
+}
+function showTab(id,el) { const n = PANE_STAGE[id]; if (n) showStage(n); }
+function setStageStatus(n, state, msg) {
+  const pill = document.getElementById('stage-status-'+n);
+  if (pill) { pill.textContent = state + (msg ? '' : ''); pill.className = 'stage-status ' + (state==='not run' ? '' : state); }
+  const dot = document.getElementById('step-dot-'+n);
+  if (dot) dot.textContent = state==='done' ? '✓' : state==='failed' ? '✗' : state==='skipped' ? '– skipped' : state==='running' ? '…' : '';
+  if (msg) { const sum = document.getElementById('stage-summary-'+n); if (sum) sum.innerHTML = msg; }
 }
 
 // ═══════════════════════════════════════════════════════
 //  Init
 // ═══════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════
-//  Cyberdeck archetype data (9 hat-color builds)
-// ═══════════════════════════════════════════════════════
-const CYBERDECK_BUILDS = [
-  {
-    id:'white', label:'White Hat', emoji:'⬜', color:'#e8e8ea', textColor:'#1a1a2a',
-    sub:'General pentest deck',
-    goal:'Pocket Kali machine — Wi-Fi audits of your own networks, UART/JTAG on IoT, network recon.',
-    safety:'Own networks / written auth only',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'Raspberry Pi Zero 2 W (with headers)', notes:'Brain'},
-      {qty:1, part:'3.5" SPI TFT — Waveshare 3.5" or Adafruit PiTFT class', notes:'Display'},
-      {qty:1, part:'BBQ10 keyboard (Solder Party, I2C)', notes:'Input'},
-      {qty:1, part:'USB Wi-Fi (MT7612U or RTL8812AU) + OTG hub', notes:'Monitor mode'},
-      {qty:1, part:'USB-UART adapter (CP2102 or FT232)', notes:'Serial debug'},
-      {qty:1, part:'GPS module NEO-6M', notes:'Geolocation'},
-      {qty:1, part:'Pocket logic analyzer (Saleae-compat 8-ch)', notes:'Protocol analysis'},
-      {qty:1, part:'SWD/JTAG probe (RPi Debug Probe)', notes:'Firmware access'},
-      {qty:1, part:'microSD 64 GB (Kali ARM image)', notes:'OS'},
-      {qty:1, part:'LiPo 3.7V 2000–5000 mAh + PowerBoost 1000C', notes:'Power'},
-    ],
-    wiring:[
-      {module:'BBQ10',pin:'VCC / GND',brain:'Pin 1 (3.3V) / Pin 9 (GND)',notes:''},
-      {module:'BBQ10',pin:'SDA / SCL',brain:'Pin 3 (GPIO2) / Pin 5 (GPIO3)',notes:'I2C'},
-      {module:'BBQ10',pin:'INT',brain:'Pin 7 (GPIO4)',notes:'Interrupt'},
-      {module:'NEO-6M',pin:'VCC / GND',brain:'Pin 17 (3.3V) / Pin 14 (GND)',notes:''},
-      {module:'NEO-6M',pin:'TX → Pi RX',brain:'Pin 10 (GPIO15)',notes:'Disable serial console first'},
-      {module:'NEO-6M',pin:'RX ← Pi TX',brain:'Pin 8 (GPIO14)',notes:''},
-      {module:'3.5" TFT HAT',pin:'40-pin header',brain:'SPI0 (full header)',notes:'Use stacking header for I2C access'},
-      {module:'USB Wi-Fi / JTAG',pin:'USB',brain:'OTG hub',notes:''},
-    ],
-    enclosure:`+--------------------------------+\n|  [ 3.5" TFT ]                  |\n|                                |\n|  [  BBQ10 keyboard  ]          |\n+--------------------------------+\n side: USB hub, USB-C charge, power switch\n top:  antenna cutout (GPS patch under lid)\n rear: debug probe / UART header access door`,
-    notes:'Disable the serial login console so GPS can use UART. Most TFT HATs cover the header — use a stacking header or flat-cable breakout for I2C/UART pins.',
-  },
-  {
-    id:'red', label:'Red Team', emoji:'🟥', color:'#ef4444', textColor:'#fff',
-    sub:'Offensive emulation deck',
-    goal:'Physical security & access-control testing: badge cloning, sub-GHz replay, authorized HID tests.',
-    safety:'Authorized engagements ONLY — written scope required',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'M5Stack Cardputer or LilyGO T-Deck (ESP32-S3 + keyboard)', notes:'Brain'},
-      {qty:1, part:'CC1101 sub-GHz module (433/868/915 MHz)', notes:'Match regional legal band'},
-      {qty:1, part:'PN532 NFC/RFID module (I2C mode)', notes:'Badge cloning'},
-      {qty:1, part:'nRF24L01+ with PA/LNA', notes:'Optional 2.4 GHz'},
-      {qty:1, part:'IR LED + IR receiver (TSOP38238)', notes:'IR replay'},
-      {qty:1, part:'Raspberry Pi Pico W', notes:'USB HID tests only'},
-      {qty:1, part:'HackRF One + PortaPack Mayhem (optional)', notes:'SDR, separate unit'},
-      {qty:1, part:'LiPo 3.7V 2000 mAh + charge board', notes:'Power'},
-    ],
-    wiring:[
-      {module:'CC1101',pin:'SCK / MISO / MOSI',brain:'ESP32 GPIO 12 / 13 / 11',notes:'SPI'},
-      {module:'CC1101',pin:'CSN / GDO0',brain:'ESP32 GPIO 10 / 4',notes:'3.3V only'},
-      {module:'PN532',pin:'SDA / SCL',brain:'ESP32 GPIO 8 / 9',notes:'I2C mode switch set'},
-      {module:'PN532',pin:'VCC / GND',brain:'3V3 / GND',notes:''},
-      {module:'IR TX',pin:'via NPN transistor',brain:'ESP32 GPIO 14',notes:''},
-      {module:'IR RX',pin:'OUT',brain:'ESP32 GPIO 15',notes:''},
-      {module:'nRF24L01+',pin:'SPI (shared bus)',brain:'CSN GPIO 5, CE GPIO 6',notes:'10µF cap across power pins'},
-      {module:'Pico W',pin:'USB',brain:'Separate USB device',notes:'Flash as HID only'},
-    ],
-    enclosure:`+----------------------------------+\n| [ screen ]        [ ant ant ]    |\n| [ keyboard ]      NFC pad (rear) |\n+----------------------------------+\n front lip: IR window\n rear:  PN532 flush behind ≤2mm wall\n top:   SMA pigtails to sub-GHz antenna\n bay:   Pico W slot with USB-C pass-through`,
-    notes:'10µF cap across nRF24L01+ power pins. Check local radio-transmission regulations before using any transmit-capable module.',
-  },
-  {
-    id:'blue', label:'Blue Team', emoji:'🟦', color:'#3b82f6', textColor:'#fff',
-    sub:'Defender / monitoring deck',
-    goal:'Passive network capture, rogue-AP detection, RF/BLE baselining.',
-    safety:'Passive capture only — do not capture others\' credentials',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'Raspberry Pi 5 (4–8 GB) with active cooler', notes:'Brain'},
-      {qty:1, part:'Passive LAN tap (Throwing Star or equiv)', notes:'Capture'},
-      {qty:1, part:'Dual-port USB 3 Gigabit Ethernet adapter', notes:'Tap interfaces'},
-      {qty:1, part:'E-ink display Waveshare 2.13" or 2.9" HAT', notes:'Status/alerts'},
-      {qty:1, part:'ESP32 dev board (rogue AP / deauth / BLE scan)', notes:'Detector node'},
-      {qty:1, part:'RTL-SDR v4 + small antenna', notes:'RF baseline'},
-      {qty:1, part:'Small powered USB hub', notes:''},
-      {qty:1, part:'NVMe SSD hat (high-endurance)', notes:'pcap/log storage'},
-      {qty:1, part:'5V 5A USB-C PD power bank', notes:'Pi 5 needs real power'},
-    ],
-    wiring:[
-      {module:'LAN tap',pin:'Capture ports',brain:'USB Ethernet adapters (RX only)',notes:'Never transmit on monitor side'},
-      {module:'E-ink HAT',pin:'40-pin header',brain:'SPI0 (BUSY/RST/DC per silk)',notes:''},
-      {module:'ESP32 detector',pin:'TX',brain:'Pi RX — Pin 10 (GPIO15)',notes:''},
-      {module:'ESP32 detector',pin:'RX',brain:'Pi TX — Pin 8 (GPIO14)',notes:'Common GND required'},
-      {module:'RTL-SDR',pin:'USB',brain:'Through hub',notes:''},
-    ],
-    enclosure:`+-------------------------------------+\n|  [ e-ink 2.9" ]    status LEDs      |\n|                                     |\n|  Pi 5 + cooler (vent grille on top) |\n+-------------------------------------+\n side A: LAN IN / LAN OUT (through tap)\n side B: USB-C PD in, USB hub\n top:    SDR antenna on SMA bulkhead`,
-    notes:'Suricata or Zeek on tap interfaces. Lightweight dashboard on e-ink. ESP32 firmware counts beacon frames and flags unknown SSIDs.',
-  },
-  {
-    id:'purple', label:'Purple Team', emoji:'🟣', color:'#a855f7', textColor:'#fff',
-    sub:'Bridge deck — attack + detect',
-    goal:'Run an emulated attack and watch the detection response in real time — training and demos.',
-    safety:'Isolated lab only',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'Raspberry Pi 5 (blue-side analytics)', notes:'Brain'},
-      {qty:1, part:'ESP32-S3 dev board (red-side radio coprocessor)', notes:''},
-      {qty:1, part:'3.5" SPI TFT (red/attack side display)', notes:''},
-      {qty:1, part:'E-ink 2.9" (blue/detection side display)', notes:''},
-      {qty:1, part:'BBQ10 keyboard or compact USB keyboard', notes:'Input'},
-      {qty:1, part:'CC1101 module on ESP32', notes:'Sub-GHz (see red build)'},
-      {qty:1, part:'Mini USB hub + PD power bank', notes:'Power'},
-    ],
-    wiring:[
-      {module:'ESP32 (red side)',pin:'TX GPIO43',brain:'Pi RX — Pin 10',notes:'UART bridge'},
-      {module:'ESP32 (red side)',pin:'RX GPIO44',brain:'Pi TX — Pin 8',notes:''},
-      {module:'ESP32 (red side)',pin:'GND',brain:'Pi GND — Pin 6',notes:'Common ground'},
-      {module:'CC1101',pin:'See red-team table',brain:'ESP32',notes:''},
-      {module:'TFT (attack)',pin:'SPI0 CE0',brain:'Pi header',notes:'DC/RST separate pins'},
-      {module:'E-ink (defend)',pin:'SPI0 CE1',brain:'Pi header',notes:'DC/RST separate pins'},
-    ],
-    enclosure:`+-------------------------------------------+\n| [ RED: TFT ]            [ BLUE: e-ink ]   |\n|  attack log              detections       |\n|                                           |\n|            [ keyboard strip ]             |\n+-------------------------------------------+\n red LED bar left, blue LED bar right\n rear: Pi 5 vent, USB-C PD in`,
-    notes:'Enable Pi hardware UART, disable serial console. Use newline-delimited JSON over UART: ESP32 reports events, Pi logs and shows matching detections.',
-  },
-  {
-    id:'gray', label:'Gray Hat', emoji:'🩶', color:'#6b7280', textColor:'#fff',
-    sub:'Recon & survey deck (passive)',
-    goal:'Map Wi-Fi/BLE/LoRa coverage of your own area — log, don\'t interact.',
-    safety:'Passive only — respect privacy laws on device identifiers',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'LilyGO T-Beam (ESP32 + GPS + SX1262 LoRa + 18650)', notes:'Easiest path — pre-wired'},
-      {qty:1, part:'18650 cell (protected)', notes:'Power'},
-      {qty:1, part:'1.3" OLED (SSD1306/SH1106, I2C)', notes:'Display'},
-      {qty:1, part:'microSD module', notes:'Logging'},
-      {qty:1, part:'LoRa antenna (match your band)', notes:''},
-    ],
-    wiring:[
-      {module:'GPS NEO-M8N',pin:'TX',brain:'ESP32 GPIO18',notes:''},
-      {module:'GPS NEO-M8N',pin:'RX',brain:'ESP32 GPIO17',notes:''},
-      {module:'GPS NEO-M8N',pin:'VCC / GND',brain:'3V3 / GND',notes:''},
-      {module:'SX1262 LoRa',pin:'SCK/MISO/MOSI/NSS',brain:'GPIO 12/13/11/10',notes:'SPI'},
-      {module:'SX1262 LoRa',pin:'DIO1/BUSY/RESET',brain:'GPIO 4/5/6',notes:''},
-      {module:'OLED I2C',pin:'SDA / SCL',brain:'GPIO 8 / 9',notes:''},
-      {module:'microSD',pin:'SPI (second CS)',brain:'GPIO 7',notes:''},
-    ],
-    enclosure:`  [ OLED ]\n  [ 2 buttons ]\n  +---------+\n  | T-Beam  |  antennas up top (LoRa + GPS patch under lid)\n  | 18650   |  microSD slot flush on side\n  +---------+`,
-    notes:'The T-Beam has all this pre-wired — easiest build. Wi-Fi/BLE scanning in passive mode only.',
-  },
-  {
-    id:'black', label:'Black Hat Lab', emoji:'⬛', color:'#111118', textColor:'#aaa',
-    sub:'Threat-actor simulation (isolated lab)',
-    goal:'Practice adversary TTPs from MITRE ATT&CK against targets you built yourself — no internet route.',
-    safety:'ISOLATED LAB ONLY — no connection to any external network',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'Raspberry Pi 5 8GB with NVMe hat', notes:'Brain'},
-      {qty:1, part:'Compact travel router (GL.iNet) — WAN unplugged', notes:'Isolated lab LAN'},
-      {qty:1, part:'USB Wi-Fi (monitor mode) for own lab APs', notes:''},
-      {qty:1, part:'Pico W as USB HID test device', notes:''},
-      {qty:1, part:'3.5" HDMI/DSI touchscreen + compact keyboard', notes:''},
-      {qty:'2–3', part:'Spare Pi Zero 2 W (disposable victims)', notes:''},
-      {qty:1, part:'Container lab: DVWA, Metasploitable, vulnerable VMs', notes:''},
-    ],
-    wiring:[
-      {module:'Pi 5 ↔ lab router',pin:'Ethernet',brain:'Router LAN port',notes:'WAN port physically unplugged'},
-      {module:'Victim Pi Zeros',pin:'Wi-Fi',brain:'Router AP (isolated)',notes:''},
-      {module:'Pico W',pin:'USB',brain:'Pi or victim machine',notes:''},
-      {module:'Touchscreen',pin:'HDMI/DSI + USB touch',brain:'Pi',notes:''},
-    ],
-    enclosure:`+-------------------------------------+\n| [ 3.5–5" display ]                  |\n| [ keyboard ]                        |\n+-------------------------------------+\n rear: router velcroed in sub-bay, WAN port physically blocked\n side: "LAB ONLY" label + kill switch on router power`,
-    notes:'Keep a written scope/authorization for every test. The router\'s WAN port must remain physically disconnected at all times.',
-  },
-  {
-    id:'green', label:'Green Team', emoji:'🟩', color:'#22c55e', textColor:'#fff',
-    sub:'DevSecOps dashboard deck',
-    goal:'Live CI results, vulnerability-scanner findings, dependency alerts — LEDs go green/amber/red.',
-    safety:'Internal dev networks only',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'Raspberry Pi 4 or 5', notes:'Brain'},
-      {qty:1, part:'5" HDMI touchscreen', notes:'Dashboard display'},
-      {qty:1, part:'Compact USB keyboard', notes:'Input'},
-      {qty:1, part:'WS2812 LED strip (8 LEDs) + 74AHCT125 level shifter', notes:'Status bar'},
-      {qty:1, part:'LiPo or 5V PD power bank', notes:'Power'},
-    ],
-    wiring:[
-      {module:'WS2812 LED strip',pin:'Data',brain:'GPIO18 (via 74AHCT125)',notes:'Level shift 3.3V → 5V required'},
-      {module:'WS2812 LED strip',pin:'VCC',brain:'5V from boost board',notes:''},
-      {module:'WS2812 LED strip',pin:'GND',brain:'Common GND',notes:''},
-      {module:'5" HDMI display',pin:'HDMI + USB touch',brain:'Pi HDMI0 / USB',notes:''},
-    ],
-    enclosure:`Slim slab case — LED bar along the top edge\n+----------------------------------+\n| [ 5" HDMI touchscreen ]          |\n| [ keyboard ]  [ LED bar ▓▓▓▓▓▓ ] |\n+----------------------------------+`,
-    notes:'LEDs show green/amber/red based on CI pipeline status and CVE counts. Use rpi_ws281x library.',
-  },
-  {
-    id:'yellow', label:'Yellow Team', emoji:'🟨', color:'#f59e0b', textColor:'#1a1a0a',
-    sub:'Builder / firmware analysis deck',
-    goal:'Read and analyze firmware from devices you own; test your own code with fuzzing harnesses.',
-    safety:'Devices you own only',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'ESP32-S3 Cardputer or T-Deck', notes:'Brain'},
-      {qty:1, part:'SPI flash clip (SOIC8 test clip)', notes:'Firmware extraction'},
-      {qty:1, part:'CH341A programmer', notes:'Flash programmer'},
-      {qty:1, part:'USB-UART adapter', notes:'Serial console'},
-      {qty:1, part:'I2C/SPI bus sniffer', notes:'Protocol analysis'},
-      {qty:1, part:'Small breadboard rail', notes:'Prototyping'},
-    ],
-    wiring:[
-      {module:'SOIC8 clip',pin:'SPI pins',brain:'CH341A over USB',notes:'Match voltage of target chip'},
-      {module:'UART adapter',pin:'TX / RX / GND',brain:'Target TX/RX/GND',notes:'Same voltage level as target'},
-      {module:'CH341A',pin:'USB',brain:'Cardputer USB',notes:''},
-    ],
-    enclosure:`Flip-lid case with storage tray for clips and probes\n+----------------------------------+\n| [ screen ]  [ keyboard ]         |\n+==================================+\n| tray: SOIC clip, UART adapter,   |\n|       breadboard strip           |\n+----------------------------------+`,
-    notes:'Confirm target chip voltage before clipping. UART adapter and target must be at the same logic level.',
-  },
-  {
-    id:'orange', label:'Orange Team', emoji:'🟧', color:'#f97316', textColor:'#fff',
-    sub:'Awareness demo deck',
-    goal:'Safe live demos for training — fake captive portal on closed network showing phishing risk. No real credential capture.',
-    safety:'Isolated AP only — never capture real credentials',
-    brain:'1.3inch_lcd_hat',
-    bom:[
-      {qty:1, part:'ESP32-S3 Cardputer or Pi Zero 2 W', notes:'Brain'},
-      {qty:1, part:'Small TFT display', notes:''},
-      {qty:1, part:'Buttons + buzzer', notes:'User feedback'},
-      {qty:1, part:'Captive-portal demo AP (isolated)', notes:'No internet route'},
-      {qty:1, part:'Bright-colored case + stand', notes:'Visibility for demos'},
-    ],
-    wiring:[
-      {module:'TFT display',pin:'SPI',brain:'ESP32 SPI0',notes:''},
-      {module:'Buttons',pin:'GPIO input',brain:'ESP32 GPIOs',notes:'Pull-up resistors'},
-      {module:'Buzzer',pin:'GPIO output',brain:'ESP32 GPIO',notes:''},
-    ],
-    enclosure:`Bright case with a stand (high visibility for training audiences)\n+---------------------------+\n| [ TFT screen ]            |\n| [ BTN ]  [ BTN ]  [BUZZ]  |\n+---------------------------+\n USB-C charge on side`,
-    notes:'The captive portal AP must have no route to the internet. This is a demo tool only — never capture real user credentials.',
-  },
-];
-
-let activeDeckId = null;
-let deckScene, deckCamera, deckRenderer, deckControls, deckAnimId;
-
-function renderHatDecks() {
-  const el = document.getElementById('hat-deck-list');
-  el.innerHTML = '';
-  CYBERDECK_BUILDS.forEach(deck => {
-    const item = document.createElement('div');
-    item.className = 'hat-item';
-    item.id = `hat-item-${deck.id}`;
-    item.style.color = deck.color;
-    item.innerHTML = `
-      <div class="hat-dot" style="background:${deck.color};border:1.5px solid rgba(255,255,255,.18)"></div>
-      <div>
-        <div class="hat-name" style="color:${deck.color}">${deck.label}</div>
-        <div class="hat-sub">${deck.sub}</div>
-      </div>`;
-    item.onclick = () => selectDeck(deck.id);
-    el.appendChild(item);
-  });
-}
-
-// ── Deck detail sub-tabs ──────────────────────────────────────────────────────
-function showDeckDetail(id, el) {
-  document.querySelectorAll('.deck-detail').forEach(d => d.style.display = 'none');
-  document.querySelectorAll('.deck-dtab').forEach(t => {
-    t.style.borderBottomColor = 'transparent';
-    t.style.color = 'var(--muted)';
-  });
-  document.getElementById(id).style.display = '';
-  if (el) { el.style.borderBottomColor = 'var(--accent)'; el.style.color = 'var(--accent)'; }
-}
-
-// ── BOM checklist ─────────────────────────────────────────────────────────────
-let _bomChecked = {};
-function renderBomChecklist(deck) {
-  if (!_bomChecked[deck.id]) _bomChecked[deck.id] = {};
-  const checked = _bomChecked[deck.id];
-  const el = document.getElementById('deck-bom-list');
-  el.innerHTML = deck.bom.map((r, i) => `
-    <label style="display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer">
-      <input type="checkbox" ${checked[i] ? 'checked' : ''}
-        onchange="_bomChecked['${deck.id}'][${i}]=this.checked; updateBomProgress('${deck.id}')"
-        style="width:auto;margin-top:2px;flex-shrink:0;accent-color:${deck.color}"/>
-      <div>
-        <div style="font-size:.8rem;font-weight:600;${checked[i] ? 'text-decoration:line-through;color:var(--muted)' : ''}">${r.part}</div>
-        <div style="font-size:.7rem;color:var(--muted)">${r.qty !== 1 ? 'Qty: '+r.qty+' · ' : ''}${r.notes}</div>
-      </div>
-    </label>`).join('');
-  updateBomProgress(deck.id);
-}
-function updateBomProgress(deckId) {
-  const deck = CYBERDECK_BUILDS.find(d => d.id === deckId);
-  if (!deck) return;
-  const checked = _bomChecked[deckId] || {};
-  const done = Object.values(checked).filter(Boolean).length;
-  const total = deck.bom.length;
-  const pct = Math.round(done / total * 100);
-  const bar = `<div style="height:5px;background:var(--border);border-radius:3px;margin-top:6px;overflow:hidden">
-    <div style="height:100%;width:${pct}%;background:${deck.color};border-radius:3px;transition:width .3s"></div></div>`;
-  document.getElementById('deck-bom-progress').innerHTML =
-    `<span style="color:${deck.color};font-weight:700">${done}/${total}</span> parts sourced${bar}`;
-}
-
-// ── SVG wiring diagram ────────────────────────────────────────────────────────
-function wireColor(pin) {
-  const p = pin.toLowerCase();
-  if (p.includes('vcc') || p.includes('3v') || p.includes('5v') || p.includes('pwr') || p.includes('power')) return '#ef4444';
-  if (p.includes('gnd') || p.includes('ground')) return '#22c55e';
-  if (p.includes('sck') || p.includes('miso') || p.includes('mosi') || p.includes('spi') || p.includes('csn') || p.includes('ce')) return '#3b82f6';
-  if (p.includes('sda') || p.includes('scl') || p.includes('i2c')) return '#f59e0b';
-  if (p.includes('tx') || p.includes('rx') || p.includes('uart')) return '#a855f7';
-  return '#9ca3af';
-}
-
-function renderWiringSVG(deck) {
-  const svg = document.getElementById('deck-wire-svg');
-  const W = 360, H = Math.max(380, deck.wiring.length * 44 + 60);
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-
-  // Brain PCB block on left
-  const brainX = 10, brainY = 30, brainW = 100, brainH = H - 60;
-  // Module blocks on right
-  const modX = 250, modStartY = 30;
-
-  // Group modules (deduplicate)
-  const modules = [...new Set(deck.wiring.map(w => w.module))];
-  const modH = 28, modGap = 8;
-
-  let svgContent = `
-    <rect x="${brainX}" y="${brainY}" width="${brainW}" height="${brainH}" rx="6"
-      fill="#1b4a1b" stroke="#22c55e" stroke-width="1.2"/>
-    <text x="${brainX + brainW/2}" y="${brainY + 14}" text-anchor="middle"
-      font-size="9" fill="#22c55e" font-weight="bold">BRAIN PCB</text>
-    <text x="${brainX + brainW/2}" y="${brainY + 26}" text-anchor="middle"
-      font-size="7" fill="#4a7a4a">Waveshare HAT</text>`;
-
-  modules.forEach((mod, mi) => {
-    const my = modStartY + mi * (modH + modGap);
-    svgContent += `
-      <rect x="${modX}" y="${my}" width="98" height="${modH}" rx="4"
-        fill="#151821" stroke="#2a2f42" stroke-width="1"/>
-      <text x="${modX + 49}" y="${my + 11}" text-anchor="middle"
-        font-size="8" fill="#e2e8f0" font-weight="bold">${mod.length > 18 ? mod.slice(0,16)+'…' : mod}</text>`;
-  });
-
-  // Wires
-  deck.wiring.forEach((w, wi) => {
-    const col = wireColor(w.pin);
-    const modIdx = modules.indexOf(w.module);
-    const my = modStartY + modIdx * (modH + modGap);
-    // Spread wires vertically within brain block
-    const brainPY = brainY + 40 + wi * ((brainH - 50) / Math.max(deck.wiring.length, 1));
-    const modPY = my + modH * 0.65;
-    const mx = (brainX + brainW + modX) / 2;
-    svgContent += `
-      <path d="M${brainX+brainW} ${brainPY} C${mx} ${brainPY} ${mx} ${modPY} ${modX} ${modPY}"
-        fill="none" stroke="${col}" stroke-width="1.4" stroke-opacity="0.8"/>
-      <circle cx="${brainX+brainW}" cy="${brainPY}" r="2" fill="${col}"/>
-      <circle cx="${modX}" cy="${modPY}" r="2" fill="${col}"/>
-      <text x="${mx}" y="${(brainPY+modPY)/2 - 2}" text-anchor="middle"
-        font-size="6.5" fill="${col}" opacity="0.9">${w.pin.slice(0,16)}</text>`;
-  });
-
-  svg.innerHTML = svgContent;
-}
-
-// ── Deck 3D preview renderer ──────────────────────────────────────────────────
-function initDeckRenderer() {
-  const canvas = document.getElementById('deck-viewport');
-  const W = canvas.parentElement.clientWidth || 500;
-  const H = canvas.parentElement.clientHeight || 420;
-  if (W < 10) return;
-
-  if (deckRenderer) { deckRenderer.dispose(); }
-  if (deckAnimId)   { cancelAnimationFrame(deckAnimId); }
-
-  deckScene  = new THREE.Scene();
-  deckScene.background = new THREE.Color(0x06080d);
-  deckScene.add(new THREE.AmbientLight(0xffffff, 0.55));
-  const dl = new THREE.DirectionalLight(0xffffff, 1.1);
-  dl.position.set(120, 200, 150); dl.castShadow = true; deckScene.add(dl);
-  const dl2 = new THREE.DirectionalLight(0x5577ff, 0.35);
-  dl2.position.set(-80,-50,-80); deckScene.add(dl2);
-  const grid = new THREE.GridHelper(300, 40, 0x111820, 0x111820);
-  grid.position.y = -2; deckScene.add(grid);
-
-  deckCamera = new THREE.PerspectiveCamera(45, W/H, 0.1, 3000);
-  deckCamera.position.set(120, 90, 160);
-
-  deckRenderer = new THREE.WebGLRenderer({canvas, antialias: true});
-  deckRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  deckRenderer.setSize(W, H);
-  deckRenderer.shadowMap.enabled = true;
-  deckRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-  deckControls = new THREE.OrbitControls(deckCamera, deckRenderer.domElement);
-  deckControls.enableDamping = true;
-  deckControls.dampingFactor = 0.08;
-  deckControls.minDistance = 30;
-  deckControls.maxDistance = 600;
-
-  function deckAnimate() {
-    deckAnimId = requestAnimationFrame(deckAnimate);
-    deckControls.update();
-    deckRenderer.render(deckScene, deckCamera);
-  }
-  deckAnimate();
-}
-
-function buildDeckScene(deck) {
-  if (!deckScene) return;
-  // Clear existing objects except lights and grid
-  const toRemove = deckScene.children.filter(c => c.userData.deckObj);
-  toRemove.forEach(o => deckScene.remove(o));
-
-  const col = new THREE.Color(deck.color);
-  function mat(hex, shine=50, rough=0.6) {
-    return new THREE.MeshPhongMaterial({color: new THREE.Color(hex), shininess: shine});
-  }
-  function add(mesh) { mesh.userData.deckObj = true; deckScene.add(mesh); return mesh; }
-  function box(w,h,d,x,y,z,hex,shine) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat(hex,shine));
-    m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; return add(m);
-  }
-  function cyl(r,h,x,y,z,hex,shine) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,20), mat(hex,shine));
-    m.position.set(x,y,z); m.castShadow=true; return add(m);
-  }
-
-  // ── Shared core: LiPo battery ──
-  box(50,8,20, -30,0,30, '#2a2a35', 20);           // battery pack
-  box(50,0.5,20, -30,4.3,30, col.getStyle(), 60);  // hat-color top strip
-  box(5,2,8, -4,4,30, '#888', 40);                 // JST connector
-
-  // ── Boost/charge board ──
-  box(28,2,18, 10,0,30, '#1a3a1a', 20);            // PCB
-  box(14,4,10, 10,2.5,30, '#111', 30);             // main IC block
-  box(5,6,5, 20,3,30, '#1a1a2a', 20);              // USB-C port
-  cyl(3,3, 2,3,30, '#888', 60);                    // cap
-
-  // ── Brain PCB (Waveshare 1.3" HAT 65×30mm) ──
-  box(65,1.6,30, 32,8,15, '#1b4a1b', 30);          // FR4
-  box(51,8.5,5.1, 25,10.5,3.5, '#0d0d14', 20);    // GPIO header
-  box(51,0.5,2, 25,17.5,3.5, '#c8a820', 120);     // gold pins
-  box(23.4,1.6,23.4, 12,10,15, '#9a9a9f', 80);    // display bezel
-  box(23.4,0.8,23.4, 12,11.4,15, '#04040a', 150); // screen
-  box(12,1.8,12, 40,10,15, '#1e1e24', 30);        // joystick base
-  cyl(2.4,5.5, 40,15.65,15, '#3c3c46', 50);       // joy nub
-  [8.5,15,21.5].forEach(bz => {
-    box(6,3.5,6, 55,10.75,bz, '#0e0e14', 20);     // button body
-    cyl(2.2,0.9, 55,13.2,bz, '#e8e8ea', 50);      // button cap
-  });
-
-  // ── Hat-specific addon modules ──
-  if (deck.id === 'white') {
-    box(40,2,25, 70,8,10, '#1a1a2a', 20);          // TFT 3.5"
-    box(80,2,30, 32,8,-20, '#111', 20);             // BBQ10 keyboard
-    cyl(3,15, 90,15,15, '#666', 30);               // GPS antenna
-  } else if (deck.id === 'red') {
-    box(20,2,15, 70,8,5, '#1a1a2a', 20);           // CC1101 PCB
-    cyl(4,22, 72,20,5, '#888', 40);                // sub-GHz antenna
-    box(25,3,25, 70,8,25, '#111', 20);             // PN532 NFC
-    box(10,2,10, 70,8,45, '#1a1a2a', 20);          // nRF24 module
-    cyl(2,18, 78,18,45, '#666', 30);               // 2.4GHz antenna
-  } else if (deck.id === 'blue') {
-    box(80,4,40, -10,8,-10, '#1a2a1a', 20);        // Pi 5 (larger board)
-    box(30,3,20, 80,8,10, '#111', 20);             // RTL-SDR
-    cyl(3,25, 92,20,10, '#888', 40);               // SDR antenna
-    box(60,1,10, 20,10,-15, '#222', 10);           // e-ink display
-    box(20,3,15, -10,8,35, '#111', 20);            // LAN tap
-  } else if (deck.id === 'purple') {
-    box(65,1.6,30, 32,8,-20, '#1b4a1b', 30);       // second PCB (ESP32 side)
-    box(25,3,15, -20,8,15, '#1a1a2a', 20);         // TFT attack side
-    box(25,1,20, 100,8,15, '#222', 10);            // e-ink defend side
-  } else if (deck.id === 'gray') {
-    cyl(3,25, 32,20,0, '#888', 40);                // LoRa antenna
-    cyl(3,10, 55,15,25, '#666', 30);               // GPS antenna
-    box(10,1,10, 10,10,15, '#111', 30);            // OLED
-    box(50,8,25, 32,0,15, '#111830', 20);          // T-Beam outline
-  } else if (deck.id === 'black') {
-    box(85,4,55, -15,8,-5, '#1a1a2a', 20);         // Pi 5 8GB
-    box(60,3,30, 85,8,0, '#111', 20);             // touchscreen
-    box(40,2,20, -20,8,50, '#1a2a1a', 20);        // GL.iNet router
-  } else if (deck.id === 'green') {
-    box(85,4,55, -15,8,-5, '#1a1a2a', 20);         // Pi 4/5
-    box(70,5,25, 60,8,0, '#111', 20);             // 5" HDMI display
-    // WS2812 LED strip (8 LEDs across top)
-    for (let i=0;i<8;i++) {
-      const ledC = i < 3 ? '#22c55e' : i < 6 ? '#f59e0b' : '#ef4444';
-      box(6,2,4, -15+i*8,12,-10, ledC, 100);
-    }
-  } else if (deck.id === 'yellow') {
-    box(32,3,22, 70,8,5, '#1a1a2a', 20);           // Cardputer
-    box(15,1,8, 70,10,25, '#333', 30);             // SOIC clip
-    box(20,2,15, 70,8,38, '#111', 20);             // CH341A
-    box(30,1.5,10, 10,8,45, '#1a2a1a', 20);       // breadboard
-  } else if (deck.id === 'orange') {
-    box(32,3,22, 70,8,5, '#1a1a2a', 20);           // ESP32 Cardputer
-    box(20,2,14, 70,8,30, '#111', 20);             // small TFT
-    cyl(5,8, 85,12,15, '#c8a820', 40);             // antenna
-  }
-
-  // ── Enclosure outline (hat-color accent frame) ──
-  const EW = deck.id==='blue'||deck.id==='black'||deck.id==='green' ? 160 : 110;
-  const EH = 50, ED = 80;
-  const edgeMat = new THREE.LineBasicMaterial({color: col, transparent: true, opacity: 0.5});
-  [[0,0],[EW,0],[EW,ED],[0,ED]].forEach(([ex,ez]) => {
-    const pts = [new THREE.Vector3(ex-10,-2,ez-10), new THREE.Vector3(ex-10,EH,ez-10)];
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), edgeMat);
-    line.userData.deckObj = true;
-    deckScene.add(line);
-  });
-
-  // Camera target
-  deckControls.target.set(EW/2, 10, ED/2);
-  deckCamera.position.set(EW/2 - 20, 80, ED + 100);
-  deckControls.update();
-
-  document.getElementById('deck-3d-label').textContent =
-    `${deck.emoji} ${deck.label} — ${deck.bom.length} components`;
-  document.getElementById('deck-3d-label').style.color = deck.color;
-}
-
-function selectDeck(id) {
-  activeDeckId = id;
-  const deck = CYBERDECK_BUILDS.find(d => d.id === id);
-  if (!deck) return;
-
-  // Highlight sidebar
-  document.querySelectorAll('.hat-item').forEach(el => el.classList.remove('active'));
-  const item = document.getElementById(`hat-item-${id}`);
-  if (item) item.classList.add('active');
-
-  // Hero bar
-  const badge = document.getElementById('deck-hat-badge');
-  badge.textContent = deck.emoji;
-  badge.style.background = deck.color + '28';
-  badge.style.boxShadow = `0 0 0 2px ${deck.color}55`;
-  document.getElementById('deck-title').textContent = `${deck.emoji} ${deck.label} — ${deck.sub}`;
-  document.getElementById('deck-goal').textContent = deck.goal;
-  document.getElementById('deck-safety-badge').textContent = '⚠ ' + deck.safety;
-  document.getElementById('deck-safety-specific').textContent = deck.safety;
-
-  // BOM checklist
-  renderBomChecklist(deck);
-
-  // SVG wiring diagram
-  renderWiringSVG(deck);
-
-  // Enclosure sketch
-  document.getElementById('deck-enclosure').textContent = deck.enclosure;
-  document.getElementById('deck-notes').textContent = deck.notes;
-
-  // Switch to Deck tab
-  showTab('t-deck', document.querySelector('.tab[onclick*="t-deck"]'));
-
-  // Init deck renderer if needed, then build scene
-  requestAnimationFrame(() => {
-    if (!deckRenderer) initDeckRenderer();
-    buildDeckScene(deck);
-  });
-
-  // Also load brain PCB into the main 3D viewer
-  if (deck.brain) doCrawl(deck.brain);
-
-  // Groq AI: render brief in hero bar (async, non-blocking)
-  const briefEl = document.getElementById('deck-render-brief');
-  briefEl.textContent = '';
-  groqRenderBrief(deck).then(brief => {
-    if (brief) briefEl.textContent = '🎥 ' + brief;
-  });
-
-  // Groq AI: assembly narration in BOM tab (async, non-blocking)
-  const narrationId = 'deck-bom-narration';
-  let narEl = document.getElementById(narrationId);
-  if (!narEl) {
-    narEl = document.createElement('div');
-    narEl.id = narrationId;
-    narEl.style.cssText = 'margin-top:12px;padding:10px;background:rgba(124,92,216,.07);border:1px solid rgba(124,92,216,.2);border-radius:6px;font-size:.76rem;line-height:1.8;color:var(--muted);white-space:pre-wrap';
-    document.getElementById('dd-bom').appendChild(narEl);
-  }
-  narEl.textContent = '';
-  groqAssemblyNarration(deck).then(narration => {
-    if (narration) narEl.textContent = narration;
-  });
-}
-
 document.addEventListener('DOMContentLoaded', async ()=>{
   initThree();
-  buildColourUI();
-  renderHatDecks();
+  // Saved Builds card lives in stage 7 (Print / outputs), not in Files
+  const sc = document.getElementById('saved-builds-card');
+  if (sc) document.getElementById('t-print').appendChild(sc);
+  showStage(1);
   await Promise.all([loadKnownDevices(), loadHeaderVariants()]);
   refreshFiles();
-  // Pre-load GPIO reference for client-side lookup
   fetch(API+'/api/gpio-map').then(r=>r.json()).then(d=>{
     d.gpio.forEach(p=>{ RPI_GPIO_JS[Object.keys(RPI_GPIO_JS).length]=p; });
-    // Also key by name
     d.gpio.forEach(p=>{ if(p.gpio_key) RPI_GPIO_JS[p.gpio_key]=p; });
   }).catch(()=>{});
 });
@@ -2194,11 +1338,12 @@ async function doCrawl(key) {
     statusOk('Spec loaded: '+currentSpec.model);
     // Auto-compute geometry and update 3D viewer immediately
     await computeGeometry();
-  } catch(e){ statusErr('Crawl failed: '+e.message); }
+    return true;
+  } catch(e){ statusErr('Crawl failed: '+e.message); return false; }
 }
 
 async function computeGeometry() {
-  try { currentSpec=JSON.parse(document.getElementById('spec-json').value); } catch(e){ statusErr('Bad JSON'); return; }
+  try { currentSpec=JSON.parse(document.getElementById('spec-json').value); } catch(e){ statusErr('Bad JSON'); return false; }
   statusBusy('Computing geometry…');
   try {
     const r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
@@ -2208,7 +1353,8 @@ async function computeGeometry() {
     buildShell3D(currentGeom);
     renderGeomTable(currentGeom);
     statusOk('Geometry computed');
-  } catch(e){ statusErr('Geometry error: '+e.message); }
+    return true;
+  } catch(e){ statusErr('Geometry error: '+e.message); return false; }
 }
 
 function renderGeomTable(g) {
@@ -2227,62 +1373,96 @@ function renderGeomTable(g) {
     rows.map(r=>`<tr><td>${r[0]}</td><td style="font-family:monospace">${r[1]}</td></tr>`).join('')+'</tbody>';
   document.getElementById('asm-notes').innerHTML=
     (g.assembly_notes||[]).map(n=>`<div>• ${n}</div>`).join('') || '—';
+  renderWarnings(g);
+}
+
+function renderWarnings(g) {
+  const el = document.getElementById('fit-warnings');
+  if (!el) return;
+  const w = (g && g.warnings) || [];
+  el.innerHTML = w.length
+    ? w.map(x=>`<div class="conflict-item" style="background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3)">⚠ ${x}</div>`).join('')
+    : '<span style="color:var(--green)">✓ No fit/tolerance warnings from the dimension engine.</span>';
+}
+
+// Stepper-level alerts: pinout conflicts + power budget, visible on every
+// stage without opening the pinout panel.
+function updatePipelineAlerts() {
+  const el = document.getElementById('pipeline-alerts');
+  if (!el) return;
+  if (!currentPinout) { el.innerHTML=''; return; }
+  const conflicts = currentPinout.conflicts || [];
+  const shared = currentPinout.shared_buses || [];
+  const sharedTxt = shared.length ? ` · Shared bus pins (by design): ${shared.map(s=>`${s.gpio_key} ${s.role}`).join(', ')}` : '';
+  const pb = currentPinout.power_budget || {};
+  const pct = pb.grand_total_ma ? Math.round(pb.grand_total_ma / 4500 * 100) : 0;
+  const powerWarn = pct > 80;
+  if (!conflicts.length && !powerWarn) {
+    el.innerHTML = `<div class="card" style="border-color:rgba(34,197,94,.4)"><span style="color:var(--green);font-size:.8rem">✓ Pinout: no conflicts${sharedTxt} · Power: ${pb.grand_total_ma||'—'} mA (${pct}% of 4.5 A budget)</span></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="card" style="border-color:rgba(239,68,68,.4)">
+    ${conflicts.map(c=>`<div style="font-size:.8rem;color:var(--red)">⚠ Pinout conflict: GPIO ${c.gpio_key||''} (BCM ${c.bcm??'—'}, Phys ${c.phys_pin??'—'}) — ${(c.conflict_between||[]).join(' + ')}</div>`).join('')}
+    ${powerWarn?`<div style="font-size:.8rem;color:var(--red)">⚠ Power budget: ${pb.grand_total_ma} mA is ${pct}% of the 4.5 A budget (recommended PSU ${pb.recommended_psu_a} A)</div>`:''}
+    <div style="font-size:.74rem;color:var(--muted)">Details in stage 3 → Pinout. Shared SPI (MOSI/MISO/SCLK) and I2C (SDA/SCL) bus pins are not conflicts — devices on a bus are distinguished by chip-select or I2C address.${shared.length?` Shared here: ${shared.map(s=>`${s.gpio_key} ${s.role}`).join(', ')}.` : ''}</div>
+  </div>`;
+}
+
+function updateStage3Summary() {
+  const fil = currentSpecs?.bom_filament || {};
+  const ent = currentBuild?.entity_count;
+  setStageStatus(3, document.getElementById('stage-status-3')?.textContent === 'failed' ? 'failed' : 'done',
+    `Done. Entities: ${ent ?? '—'} · BOM + filament: ${fil.estimated_mass_g ?? '—'} g, $${fil.estimated_cost_usd ?? '—'}, ~${fil.estimated_print_hours ?? '—'} h (${fil.recommended_material || 'PETG'}). See Assembly panel below for the full BOM.`);
 }
 
 // ═══════════════════════════════════════════════════════
 //  Full pipeline
 // ═══════════════════════════════════════════════════════
-async function doPipeline() {
-  const btn=document.getElementById('btn-pipeline');
-  btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
-  if(!document.getElementById('spec-json').value.trim()) await doCrawl();
+// ═══════════════════════════════════════════════════════
+//  7-stage pipeline
+//  Stage 3 note: /api/generate-build, /api/assemble-specs and /api/pinout
+//  are run here together — pinout/wiring/assembly describe the modular
+//  build, so their panels live in stage 3.
+// ═══════════════════════════════════════════════════════
+async function runStage1() {
+  // Input already in the spec editor (known HAT click / custom PCB / a
+  // previous crawl) counts as a completed lookup; otherwise crawl.
+  const txt = document.getElementById('spec-json').value.trim();
+  if (txt) {
+    try { currentSpec = JSON.parse(txt); return true; } catch(e) { statusErr('Bad spec JSON: '+e.message); return false; }
+  }
+  return await doCrawl();
+}
+
+async function runStage2() { return await computeGeometry(); }
+
+async function runStage3() {
   try {
-    currentSpec=JSON.parse(document.getElementById('spec-json').value);
-    // Inject header
-    const hSel=document.getElementById('header-variant');
-    if(hSel.value&&headerVariants[hSel.value]){
-      const hv=headerVariants[hSel.value];
-      currentSpec.gpio_header_variant=hSel.value;
-      currentSpec.gpio_header_above_mm=hv.above_mm;
-      currentSpec.gpio_header_below_mm=hv.below_mm;
-      currentSpec.gpio_header_mated_gap_mm=hv.mated_gap_mm;
-    }
-
-    // 1. Geometry
-    statusBusy('Geometry…');
-    let r=await fetch(API+'/api/compute-geometry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
-    let d=await r.json(); if(d.status!=='ok') throw new Error('Geom: '+d.detail);
-    currentGeom=d.geometry;
-    buildShell3D(currentGeom);
-    renderGeomTable(currentGeom);
-
-    // 2. Build manifest
+    if (!currentSpec || !currentGeom) { statusErr('Run stages 1–2 first.'); return false; }
+    // Modular build manifest
     statusBusy('Build manifest…');
     const batRaw=document.getElementById('bat-size').value.split(',').map(Number);
-    r=await fetch(API+'/api/generate-build',{method:'POST',headers:{'Content-Type':'application/json'},
+    let r=await fetch(API+'/api/generate-build',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({spec:currentSpec,geom:currentGeom,
         model_name:document.getElementById('model-name').value,
         include_battery:document.getElementById('inc-battery').checked,
         battery_size_mm:batRaw})});
-    d=await r.json(); if(d.status!=='ok') throw new Error('Build: '+d.detail);
+    let d=await r.json(); if(d.status!=='ok') throw new Error('Build: '+(d.detail||''));
     currentBuild=d.build;
-
     document.getElementById('build-kv').innerHTML=
       `<div class="kv-k">Model</div><div class="kv-v">${currentBuild.model_name}</div>`+
       `<div class="kv-k">Entities</div><div class="kv-v">${currentBuild.entity_count}</div>`;
-
-    // 3. Specs
+    // Assembly specs + BOM + filament
     statusBusy('Assembly specs…');
     r=await fetch(API+'/api/assemble-specs',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({spec:currentSpec,geom:currentGeom,build:currentBuild})});
-    d=await r.json(); if(d.status!=='ok') throw new Error('Specs: '+d.detail);
+    d=await r.json(); if(d.status!=='ok') throw new Error('Specs: '+(d.detail||''));
     currentSpecs=d.specs; currentMdFile=d.files.markdown; currentJsonFile=d.files.json;
     renderSpecs(currentSpecs);
-
-    // 4. Pinout
+    // Pinout + wiring
     statusBusy('Pinout & wiring…');
     r=await fetch(API+'/api/pinout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spec:currentSpec})});
-    d=await r.json(); if(d.status!=='ok') throw new Error('Pinout: '+d.detail);
+    d=await r.json(); if(d.status!=='ok') throw new Error('Pinout: '+(d.detail||''));
     currentPinout=d.pinout;
     WIRE_COLOURS_JS=currentPinout.wire_colours||{};
     renderGPIOMap(currentPinout.gpio_map||[]);
@@ -2291,26 +1471,89 @@ async function doPipeline() {
     renderSafety(currentPinout.safety_checklist||[]);
     buildWiringDiagram(currentPinout);
     renderConflicts(currentPinout.conflicts||[]);
+    if (window.updatePipelineAlerts) updatePipelineAlerts();
+    if (window.updateStage3Summary) updateStage3Summary();
+    return true;
+  } catch(e) { statusErr('Stage 3 error: '+e.message); return false; }
+}
 
-    statusOk('Pipeline complete ✓');
-    // Switch to 3D tab
-    showTab('t-3d', document.querySelectorAll('.tab')[0]);
-    document.querySelectorAll('.tab')[0].classList.add('active');
+async function runStage4() {
+  const res = await generate3D();
+  return res;  // true | 'skipped' | false
+}
 
+async function runStage5() { return await generateFirmware(); }
+
+async function runStage6() { return await generateReport(); }
+
+async function runStage7() {
+  // 'Package for printer' only — never upload/start a physical print here.
+  const ok = await createPrintPackage();
+  if (ok) return true;
+  // No STLs (e.g. Blender was skipped) is a skip, not a pipeline failure.
+  const msg = document.getElementById('pkg-status')?.textContent || '';
+  if (msg.includes('No STL')) return 'skipped';
+  return false;
+}
+
+const STAGE_RUNNERS = {1:runStage1, 2:runStage2, 3:runStage3, 4:runStage4, 5:runStage5, 6:runStage6, 7:runStage7};
+
+async function runStage(n) {
+  showStage(n);
+  setStageStatus(n, 'running');
+  let res;
+  try { res = await STAGE_RUNNERS[n](); } catch(e) { res = false; statusErr('Stage '+n+' error: '+e.message); }
+  if (res === 'skipped') {
+    const why = n === 4 ? 'skipped: Blender not found' : 'skipped';
+    setStageStatus(n, 'skipped', why + ' — ' + (document.getElementById('status-msg')?.textContent || ''));
+    return 'skipped';
+  }
+  if (res) { setStageStatus(n, 'done', 'Done. ' + (n===2 && currentGeom ? `Shell ${currentGeom.shell_width_mm}×${currentGeom.shell_height_mm}×${currentGeom.shell_depth_mm} mm.` : '')); return true; }
+  setStageStatus(n, 'failed', 'Failed: ' + (document.getElementById('status-msg')?.textContent || 'see status bar'));
+  return false;
+}
+
+async function doPipeline() {
+  const btn=document.getElementById('btn-pipeline');
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Running…';
+  try {
+    // Inject the chosen header variant into the spec first
+    const txt = document.getElementById('spec-json').value.trim();
+    if (txt) {
+      try {
+        currentSpec = JSON.parse(txt);
+        const hSel=document.getElementById('header-variant');
+        if(hSel.value&&headerVariants[hSel.value]){
+          const hv=headerVariants[hSel.value];
+          currentSpec.gpio_header_variant=hSel.value;
+          currentSpec.gpio_header_above_mm=hv.above_mm;
+          currentSpec.gpio_header_below_mm=hv.below_mm;
+          currentSpec.gpio_header_mated_gap_mm=hv.mated_gap_mm;
+          document.getElementById('spec-json').value=JSON.stringify(currentSpec,null,2);
+        }
+      } catch(e) { /* stage 1 will report the bad JSON */ }
+    }
+    for (let n = 1; n <= 7; n++) {
+      showStage(n);
+      const res = await runStage(n);
+      if (res === false) { statusErr(`Pipeline stopped at stage ${n}: ` + (document.getElementById('status-msg')?.textContent || 'failed')); break; }
+      if (n === 7 && res === true) statusOk('Pipeline complete ✓ (print package created; nothing was sent to a printer)');
+    }
     await refreshFiles();
-  } catch(e){ statusErr('Pipeline error: '+e.message); console.error(e); }
-  finally { btn.disabled=false; btn.innerHTML='▶ Run Pipeline'; }
+  } finally { btn.disabled=false; btn.innerHTML='▶ Run Pipeline (7 stages)'; }
 }
 
 function renderConflicts(conflicts) {
   const el=document.getElementById('conflict-list');
-  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>';return;}
+  const shared=(typeof currentPinout !== 'undefined' && currentPinout && currentPinout.shared_buses) || [];
+  const sharedHtml=shared.length?`<div style="font-size:.78rem;color:var(--muted);margin-top:6px">Shared bus pins (by design, not conflicts): ${shared.map(s=>`${s.gpio_key} ${s.role} — ${(s.shared_by||[]).join(' + ')}`).join(' · ')}</div>`:'';
+  if(!conflicts.length){el.innerHTML='<span style="color:var(--green);font-size:.8rem">✓ No conflicts detected.</span>'+sharedHtml;return;}
   el.innerHTML=conflicts.map(c=>`
     <div class="conflict-item">
       <b style="color:var(--red)">⚠ GPIO ${c.gpio_key} (BCM ${c.bcm}, Phys ${c.phys_pin})</b><br>
       <span>${c.conflict_between.join(' + ')}</span><br>
       <span style="color:var(--muted);font-size:.74rem">${c.note}</span>
-    </div>`).join('');
+    </div>`).join('')+sharedHtml;
 }
 
 function renderSpecs(specs) {
@@ -2342,19 +1585,21 @@ function renderSpecs(specs) {
 //  3D → Blender export
 // ═══════════════════════════════════════════════════════
 async function generate3D() {
-  if(!currentSpec){statusErr('Load a spec first.');return;}
+  if(!currentSpec){statusErr('Load a spec first.');return false;}
   statusBusy('Sending to Blender…');
   try {
     const r=await fetch(API+'/api/generate-3d',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({spec:currentSpec,model_name:document.getElementById('model-name').value})});
     const d=await r.json();
     document.getElementById('log').textContent=JSON.stringify(d,null,2);
+    if (d.status==='skipped') { statusOk('Stage 4 skipped: Blender not found'); return 'skipped'; }
     statusOk('Blender job queued — polling for PCB STL…');
     setTimeout(refreshFiles,5000);
     // Find the pcb_stl filename from expected_files and start polling
     const pcbFile = (d.expected_files||[]).find(f=>f.endsWith('_pcb.stl'));
     if(pcbFile) pollAndLoadPcbStl(pcbFile, 0);
-  } catch(e){ statusErr('3D gen error: '+e.message); }
+    return true;
+  } catch(e){ statusErr('3D gen error: '+e.message); return false; }
 }
 
 // Poll /api/outputs until pcbFile appears, then load it into the Three.js scene
@@ -2503,7 +1748,7 @@ function renderEventTypes(events) {
 }
 
 async function generateFirmware() {
-  if (!currentSpec) { statusErr('Load a device spec first.'); return; }
+  if (!currentSpec) { statusErr('Load a device spec first.'); return false; }
   const btn = document.getElementById('btn-fw-gen');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating…';
   statusBusy('Generating firmware files…');
@@ -2525,8 +1770,10 @@ async function generateFirmware() {
     renderFwFileTree(fwManifest.files_list);
     await refreshFiles();
     statusOk(`Firmware generated — ${fwManifest.files_list.length} files`);
+    return true;
   } catch(e) {
     statusErr('Firmware error: '+e.message);
+    return false;
   } finally {
     btn.disabled=false; btn.innerHTML='⚡ Generate Firmware';
   }
@@ -2608,8 +1855,8 @@ function downloadFwZip() {
 // ═══════════════════════════════════════════════════════
 async function generateReport() {
   if (!currentSpec||!currentGeom||!currentPinout||!currentSpecs) {
-    statusErr('Run the full pipeline first (all data needed for report).');
-    return;
+    statusErr('Run stages 1–3 first (all data needed for report).');
+    return false;
   }
   const btn = document.getElementById('btn-report');
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating PDF…';
@@ -2642,8 +1889,10 @@ async function generateReport() {
       `style="color:var(--accent)">Download PDF</a>`;
     await refreshFiles();
     statusOk(`PDF report ready: ${d.pdf_file}`);
+    return true;
   } catch(e) {
     statusErr('PDF error: '+e.message);
+    return false;
     document.getElementById('report-status').textContent = 'Error: '+e.message;
   } finally {
     btn.disabled=false; btn.innerHTML='📄 Generate PDF Report';
@@ -2777,7 +2026,7 @@ async function createPrintPackage() {
   if (!stls.length) {
     statusErr('No STL files found — generate 3D files first (Blender).');
     document.getElementById('pkg-status').textContent = 'No STL files in output/. Generate them first.';
-    return;
+    return false;
   }
 
   const r = await fetch(API+'/api/print/package', {
@@ -2798,8 +2047,10 @@ async function createPrintPackage() {
       `<a href="${API}/api/download/${zipName}" target="_blank" style="color:var(--accent)">Download ZIP</a>`;
     await refreshFiles();
     statusOk('Print package ready: '+zipName);
+    return true;
   } else {
     statusErr('Package error: '+(d.detail||''));
+    return false;
   }
 }
 
@@ -2964,96 +2215,78 @@ async function pollBlenderLog() {
 }
 
 // ═══════════════════════════════════════════════════════
-//  Device save-slots (localStorage, up to 3)
+//  Saved builds — server-side (/api/saved-builds, JSON in data/saved_builds/)
+//  (replaces the old localStorage saves, which were per-browser only)
 // ═══════════════════════════════════════════════════════
-const SAVE_KEY = 'handheld3d_saves';
-
-function getSaves() {
-  try { return JSON.parse(localStorage.getItem(SAVE_KEY)||'[]'); }
-  catch(e) { return []; }
-}
-
-function putSaves(arr) {
-  localStorage.setItem(SAVE_KEY, JSON.stringify(arr.slice(0,3)));
-}
-
-function saveBuild() {
+async function saveBuild() {
   if (!currentSpec) { statusErr('No spec loaded — run pipeline or select a device first.'); return; }
-  const name = document.getElementById('save-slot-name').value.trim() ||
-    currentSpec.model || 'Build';
-  const saves = getSaves().filter(s=>s.name!==name);
-  saves.unshift({
-    name,
-    spec:  currentSpec,
-    geom:  currentGeom,
-    build: currentBuild,
-    specs: currentSpecs,
-    pinout: currentPinout,
-    saved_at: new Date().toISOString(),
-  });
-  putSaves(saves);
-  document.getElementById('save-slot-name').value = '';
-  renderSavedBuilds();
-  statusOk(`Saved build: "${name}"`);
+  const name = document.getElementById('save-slot-name').value.trim() || currentSpec.model || 'Build';
+  try {
+    const r = await fetch(API+'/api/saved-builds', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, spec: currentSpec, geom: currentGeom, build: currentBuild, specs: currentSpecs, pinout: currentPinout})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'save failed');
+    document.getElementById('save-slot-name').value = '';
+    await renderSavedBuilds();
+    statusOk(`Saved build on server: "${name}"`);
+  } catch(e) { statusErr('Save failed: '+e.message); }
 }
 
-function loadSave(idx) {
-  const saves = getSaves();
-  const s = saves[idx];
-  if (!s) return;
-  currentSpec   = s.spec;
-  currentGeom   = s.geom;
-  currentBuild  = s.build;
-  currentSpecs  = s.specs;
-  currentPinout = s.pinout;
-  document.getElementById('spec-json').value = JSON.stringify(currentSpec||{}, null, 2);
-  if (currentGeom) {
-    buildShell3D(currentGeom);
-    renderGeomTable(currentGeom);
-  }
-  if (currentSpecs) renderSpecs(currentSpecs);
-  if (currentPinout) {
-    WIRE_COLOURS_JS = currentPinout.wire_colours||{};
-    renderGPIOMap(currentPinout.gpio_map||[]);
-    renderPinoutTables(currentPinout);
-    renderPowerBudget(currentPinout.power_budget);
-    renderSafety(currentPinout.safety_checklist||[]);
-    buildWiringDiagram(currentPinout);
-    renderConflicts(currentPinout.conflicts||[]);
-  }
-  statusOk(`Loaded build: "${s.name}"`);
+async function loadSave(name) {
+  try {
+    const r = await fetch(API+'/api/saved-builds/'+encodeURIComponent(name));
+    const s = await r.json();
+    if (!r.ok) throw new Error(s.detail || 'load failed');
+    currentSpec = s.spec; currentGeom = s.geom; currentBuild = s.build; currentSpecs = s.specs; currentPinout = s.pinout;
+    document.getElementById('spec-json').value = JSON.stringify(currentSpec||{}, null, 2);
+    if (currentGeom) { buildShell3D(currentGeom); renderGeomTable(currentGeom); }
+    if (currentSpecs) renderSpecs(currentSpecs);
+    if (currentPinout) {
+      WIRE_COLOURS_JS = currentPinout.wire_colours||{};
+      renderGPIOMap(currentPinout.gpio_map||[]);
+      renderPinoutTables(currentPinout);
+      renderPowerBudget(currentPinout.power_budget);
+      renderSafety(currentPinout.safety_checklist||[]);
+      buildWiringDiagram(currentPinout);
+      renderConflicts(currentPinout.conflicts||[]);
+      if (window.updatePipelineAlerts) updatePipelineAlerts();
+    }
+    statusOk(`Loaded build: "${s.name}"`);
+  } catch(e) { statusErr('Load failed: '+e.message); }
 }
 
-function deleteSave(idx) {
-  const saves = getSaves();
-  saves.splice(idx,1);
-  putSaves(saves);
-  renderSavedBuilds();
+async function deleteSave(name) {
+  try {
+    const r = await fetch(API+'/api/saved-builds/'+encodeURIComponent(name), {method:'DELETE'});
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.detail || 'delete failed'); }
+    await renderSavedBuilds();
+    statusOk(`Deleted build: "${name}"`);
+  } catch(e) { statusErr('Delete failed: '+e.message); }
 }
 
-function renderSavedBuilds() {
+async function renderSavedBuilds() {
   const el = document.getElementById('saved-builds-list');
-  const saves = getSaves();
+  if (!el) return;
+  let saves = [];
+  try { const r = await fetch(API+'/api/saved-builds'); saves = (await r.json()).builds || []; } catch(e) {}
   if (!saves.length) {
-    el.innerHTML = '<span style="font-size:.78rem;color:var(--muted)">No saved builds yet.</span>';
+    el.innerHTML = '<span style="font-size:.78rem;color:var(--muted)">No saved builds yet (server-side).</span>';
     return;
   }
-  el.innerHTML = saves.map((s,i)=>`
+  el.innerHTML = saves.map(s=>`
     <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:7px 10px">
       <div>
         <span style="font-weight:600;font-size:.8rem">${s.name}</span>
-        <span style="color:var(--muted);font-size:.7rem;margin-left:8px">${s.spec?.board_width_mm||'—'}×${s.spec?.board_height_mm||'—'}mm</span>
-        <div style="color:var(--muted);font-size:.7rem">${new Date(s.saved_at).toLocaleDateString()}</div>
+        <span style="color:var(--muted);font-size:.7rem;margin-left:8px">${s.board_mm||''}mm</span>
+        <div style="color:var(--muted);font-size:.7rem">${s.saved_at ? new Date(s.saved_at).toLocaleString() : ''}</div>
       </div>
       <div style="display:flex;gap:5px">
-        <button class="btn btn-secondary" style="padding:3px 8px;font-size:.72rem" onclick="loadSave(${i})">Load</button>
-        <button class="btn btn-red" style="padding:3px 8px;font-size:.72rem" onclick="deleteSave(${i})">✕</button>
+        <button class="btn btn-secondary" style="padding:3px 8px;font-size:.72rem" onclick="loadSave('${String(s.name).replace(/'/g,"\\'")}')">Load</button>
+        <button class="btn btn-red" style="padding:3px 8px;font-size:.72rem" onclick="deleteSave('${String(s.name).replace(/'/g,"\\'")}')">✕</button>
       </div>
     </div>`).join('');
 }
 
-// Render saved builds on DOMContentLoaded
-document.addEventListener('DOMContentLoaded', ()=>{ renderSavedBuilds(); });
 </script>
 </body>
 </html>

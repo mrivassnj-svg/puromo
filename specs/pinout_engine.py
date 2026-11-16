@@ -406,14 +406,22 @@ MODULE_PINOUTS = {
 # Conflict detection
 # ---------------------------------------------------------------------------
 
-def detect_conflicts(selected_modules: List[str]) -> List[dict]:
-    """
-    Check for GPIO pin conflicts across all selected modules.
-    Returns list of conflict dicts.
-    """
-    pin_usage: Dict[str, List[str]] = {}  # gpio_key → [module_labels]
-    conflicts = []
+# Bus pins that are shared by design: every device on the bus connects to
+# the same physical pin, and devices are distinguished another way
+# (SPI: a unique chip-select line per device; I2C: a unique address).
+# Sharing one of these pins is NOT a conflict, as long as every claimant
+# uses it for the same bus role on the same bus. A chip-select (CS) pin,
+# a GPIO, or any other exclusive signal claimed by two modules IS a
+# conflict, as is a bus pin claimed for two different roles.
+SHARED_BUS_ROLES = {
+    "SPI": {"MOSI", "MISO", "SCLK"},
+    "I2C": {"SDA", "SCL"},
+}
 
+
+def _pin_usage(selected_modules: List[str]) -> Dict[str, List[dict]]:
+    """gpio_key → [{module, interface, role}, …] for non-power pins."""
+    pin_usage: Dict[str, List[dict]] = {}
     for mod_key in selected_modules:
         mod = MODULE_PINOUTS.get(mod_key)
         if not mod:
@@ -421,10 +429,69 @@ def detect_conflicts(selected_modules: List[str]) -> List[dict]:
         for pin in mod["pins"]:
             gk = pin.get("gpio_key")
             if gk and pin["role"] not in ("GND", "3V3", "5V"):
-                pin_usage.setdefault(gk, []).append(mod["label"])
+                pin_usage.setdefault(gk, []).append({
+                    "module":    mod["label"],
+                    "interface": mod.get("interface", ""),
+                    "role":      pin["role"],
+                })
+    return pin_usage
 
-    for gpio_key, modules in pin_usage.items():
-        if len(modules) > 1:
+
+def _distinct_modules(usages: List[dict]) -> List[str]:
+    return list(dict.fromkeys(u["module"] for u in usages))
+
+
+def _shared_bus_role(usages: List[dict]) -> Optional[str]:
+    """
+    Return the shared bus role if every usage is the same bus role on the
+    same bus (e.g. all SPI MOSI), otherwise None.
+    """
+    interfaces = {u["interface"] for u in usages}
+    roles = {u["role"] for u in usages}
+    if len(interfaces) != 1 or len(roles) != 1:
+        return None
+    interface = next(iter(interfaces))
+    role = next(iter(roles))
+    return role if role in SHARED_BUS_ROLES.get(interface, set()) else None
+
+
+def shared_bus_pins(selected_modules: List[str]) -> List[dict]:
+    """
+    Return the bus pins (SPI MOSI/MISO/SCLK, I2C SDA/SCL) that are
+    legitimately shared by two or more selected modules, so callers can
+    present them as shared-by-design rather than as conflicts.
+    """
+    shared = []
+    for gpio_key, usages in _pin_usage(selected_modules).items():
+        modules = _distinct_modules(usages)
+        role = _shared_bus_role(usages)
+        if len(modules) > 1 and role:
+            gpio_info = RPI_GPIO.get(gpio_key, {})
+            shared.append({
+                "gpio_key":  gpio_key,
+                "phys_pin":  gpio_info.get("phys"),
+                "bcm":       gpio_info.get("bcm"),
+                "role":      role,
+                "interface": usages[0]["interface"],
+                "shared_by": modules,
+                "note":      f"{usages[0]['interface']} {role} is a shared bus pin — devices on the bus are distinguished by {'chip-select' if usages[0]['interface'] == 'SPI' else 'I2C address'}, not by this pin",
+            })
+    return shared
+
+
+def detect_conflicts(selected_modules: List[str]) -> List[dict]:
+    """
+    Check for GPIO pin conflicts across all selected modules.
+    Returns list of conflict dicts.
+
+    Shared bus pins (see SHARED_BUS_ROLES) used for the same bus role by
+    every claimant are not conflicts; see shared_bus_pins() for those.
+    """
+    conflicts = []
+
+    for gpio_key, usages in _pin_usage(selected_modules).items():
+        modules = _distinct_modules(usages)
+        if len(modules) > 1 and not _shared_bus_role(usages):
             gpio_info = RPI_GPIO.get(gpio_key, {})
             conflicts.append({
                 "gpio_key":  gpio_key,
@@ -497,6 +564,7 @@ class PinoutEngine:
     def generate(self) -> dict:
         selected = self._infer_modules()
         conflicts = detect_conflicts(selected)
+        shared    = shared_bus_pins(selected)
         budget    = power_budget(selected, self.spec.get("compatible_boards", ["RPi 4"])[0]
                                  if self.spec.get("compatible_boards") else "RPi 4")
         wiring_tables = {}
@@ -510,6 +578,7 @@ class PinoutEngine:
             "wiring_tables":     wiring_tables,
             "gpio_map":          self._full_gpio_map(selected),
             "conflicts":         conflicts,
+            "shared_buses":      shared,
             "power_budget":      budget,
             "safety_checklist":  self._safety_checklist(selected),
             "wire_colours":      WIRE_COLOURS,

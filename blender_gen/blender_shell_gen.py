@@ -911,10 +911,15 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
     # Header body: 51.0mm × 5.1mm × 8.5mm (above PCB)
     H_W  = mm(51.0)   # 20 × 2.54mm pitch
     H_D  = mm(5.1)    # 2 rows × 2.54mm + slight overhang
-    H_H  = mm(8.5)    # standard 11mm header above PCB = 8.5mm plastic body
-    # Position: GPIO header on left of RPi HAT is at ~x=7.1mm, y=3.5mm on the board
-    H_X  = mm(7.1)
-    H_Y  = mm(3.5)
+    H_H  = mm(geom.get("gpio_header_above_mm", 0) or spec.get("gpio_header_above_mm", 8.5))  # from backend geometry
+    # Position comes from the backend geometry (gpio_header_position_mm,
+    # the RPi HAT pin-1 corner convention owned by DimensionMath) — this
+    # script must not hardcode its own copy.
+    hdr_pos = geom.get("gpio_header_position_mm") if isinstance(geom, dict) else None
+    if not hdr_pos:
+        raise ValueError("geometry is missing gpio_header_position_mm — run DimensionMath first")
+    H_X  = mm(hdr_pos[0])
+    H_Y  = mm(hdr_pos[1])
 
     hdr = _add_box("GPIO_Header",
                    H_X, H_Y, z_offset + BT,
@@ -1026,7 +1031,7 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
 # Main entry
 # ---------------------------------------------------------------------------
 
-def generate_shell(spec_path: str, output_dir: str = "output"):
+def generate_shell(spec_path: str, output_dir: str = "output", geometry_path: str = None):
     if not BLENDER_AVAILABLE:
         print("[ERROR] bpy not available. Run inside Blender.")
         return
@@ -1034,31 +1039,38 @@ def generate_shell(spec_path: str, output_dir: str = "output"):
     with open(spec_path) as f:
         raw_spec = json.load(f)
 
-    # Run dimension math engine
+    # ── Geometry: SINGLE SOURCE OF TRUTH ──
+    # Prefer, in order: (1) an explicit --geometry JSON file written by the
+    # backend (/api/generate-3d writes one from DimensionMath), (2) a
+    # "geometry" key embedded in the spec file, (3) a fallback that calls
+    # DimensionMath itself (the same code — never duplicated constants).
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from parser.dimension_math import DimensionMath
-    import dataclasses
+    geom = None
+    if geometry_path:
+        with open(geometry_path) as gf:
+            geom = json.load(gf)
+        print(f"[Puromo] Using backend geometry from {geometry_path}")
+    elif isinstance(raw_spec.get("geometry"), dict):
+        geom = raw_spec["geometry"]
+        print("[Puromo] Using geometry embedded in spec file")
+    if geom is None:
+        from parser.dimension_math import DimensionMath
+        import dataclasses
+        geom = dataclasses.asdict(DimensionMath(raw_spec).compute())
+        print("[Puromo] No geometry supplied — computed via DimensionMath (fallback)")
 
-    geom_obj = DimensionMath(raw_spec).compute()
-    geom = dataclasses.asdict(geom_obj)
-
-    # Inject tolerance constants
-    geom.update({
-        "standoff_od_mm":     5.0,
-        "standoff_hole_mm":   2.5,
-        "standoff_height_mm": 3.0,
-        "floor_thickness_mm": 2.5,
-        "lid_thickness_mm":   1.8,
-        "wall_thickness_mm":  2.0,
-        "pcb_clearance_mm":   0.5,
-        "rib_thickness_mm":   1.2,
-        "corner_radius_mm":   3.0,
-        "hat_stack_height_mm": raw_spec.get("hat_stack_height_mm",
-                                            raw_spec.get("gpio_header_mated_gap_mm", 11.5)),
-        "board_thickness_mm":  raw_spec.get("board_thickness_mm", 1.6),
-        "snap_depth_mm":  1.2,
-        "snap_height_mm": 2.5,
-    })
+    # Map canonical geometry field names to the legacy keys the builders
+    # below read. All values come from the geometry dict, not constants here.
+    geom.setdefault("standoff_hole_mm", geom.get("standoff_hole_diameter_mm"))
+    geom.setdefault("corner_radius_mm", geom.get("corner_radius"))
+    geom.setdefault("hat_stack_height_mm", geom.get("gpio_header_mated_gap_mm"))
+    geom.setdefault("snap_depth_mm", geom.get("snap_fit_depth_mm"))
+    geom.setdefault("snap_height_mm", geom.get("snap_fit_height_mm"))
+    missing = [k for k in ("shell_width_mm", "shell_height_mm", "shell_depth_mm",
+                           "wall_thickness_mm", "floor_thickness_mm", "lid_thickness_mm",
+                           "standoff_height_mm", "gpio_header_position_mm") if geom.get(k) is None]
+    if missing:
+        raise ValueError(f"geometry is missing required fields: {missing}")
 
     os.makedirs(output_dir, exist_ok=True)
     model_name = raw_spec.get("model", "device").replace(" ", "_").lower()
@@ -1155,5 +1167,7 @@ if __name__ == "__main__" and BLENDER_AVAILABLE:
     parser = argparse.ArgumentParser()
     parser.add_argument("--spec",   required=True)
     parser.add_argument("--output", default="output")
+    parser.add_argument("--geometry", default=None,
+                        help="Geometry JSON from the backend (DimensionMath) — the single source of truth")
     args = parser.parse_args(argv)
-    generate_shell(args.spec, args.output)
+    generate_shell(args.spec, args.output, args.geometry)

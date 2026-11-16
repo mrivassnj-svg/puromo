@@ -68,6 +68,9 @@ app = FastAPI(
 OUTPUT_DIR  = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+SAVED_BUILDS_DIR = Path("data/saved_builds")
+SAVED_BUILDS_DIR.mkdir(parents=True, exist_ok=True)
+
 BLENDER_CMD = shutil.which("blender") or "blender"
 
 
@@ -133,6 +136,14 @@ class PrintStartRequest(BaseModel):
     api_key:     Optional[str] = None
     file_path:   str
     filename:    str = ""
+
+class SavedBuildRequest(BaseModel):
+    name:   str
+    spec:   Optional[dict] = None
+    geom:   Optional[dict] = None
+    build:  Optional[dict] = None
+    specs:  Optional[dict] = None
+    pinout: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -243,15 +254,46 @@ def assemble_specs(req: SpecsRequest):
 @app.post("/api/generate-3d")
 async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
     """
-    Write a spec JSON then invoke Blender in background to produce STL files.
-    Returns immediately with job info; check /api/download/{filename} when ready.
+    Compute geometry via DimensionMath (single source of truth), write it
+    to a geometry JSON, then invoke Blender in background to produce STLs.
+    Blender consumes that geometry file — it does not recompute dimensions.
+    If Blender is not installed, returns status="skipped" instead of
+    queueing a job that cannot run.
     """
     model_slug = req.spec.get("model", "handheld").replace(" ", "_").lower()
     spec_path  = OUTPUT_DIR / f"{model_slug}_spec.json"
+    geom_path  = OUTPUT_DIR / f"{model_slug}_geometry.json"
 
     # Save spec for Blender to read
     with open(spec_path, "w") as f:
         json.dump(req.spec, f, indent=2)
+
+    # Backend geometry — the same dict /api/compute-geometry returns
+    try:
+        geom_dict = dataclasses.asdict(DimensionMath(req.spec).compute())
+    except Exception as e:
+        logger.exception("Geometry compute failed for Blender")
+        raise HTTPException(status_code=500, detail=str(e))
+    with open(geom_path, "w") as f:
+        json.dump(geom_dict, f, indent=2)
+
+    blender_available = shutil.which("blender") is not None
+    expected = [
+        f"{model_slug}_bottom.stl",
+        f"{model_slug}_lid.stl",
+        f"{model_slug}_pcb.stl",
+        f"{model_slug}_shell.blend",
+    ]
+    if not blender_available:
+        return {
+            "status": "skipped",
+            "reason": "Blender not found",
+            "blender_available": False,
+            "message": "Blender is not installed / not on PATH — stage skipped. Geometry JSON was still written.",
+            "geometry_file": geom_path.name,
+            "expected_files": expected,
+            "log_file": f"{model_slug}_blender.log",
+        }
 
     blender_script = Path(__file__).parent / "blender_gen" / "blender_shell_gen.py"
 
@@ -263,6 +305,7 @@ async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
             "--",
             "--spec",   str(spec_path),
             "--output", str(OUTPUT_DIR),
+            "--geometry", str(geom_path),
         ]
         logger.info(f"[Blender] {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -275,13 +318,10 @@ async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
 
     return {
         "status": "queued",
+        "blender_available": True,
         "message": "Blender job queued. STL files will appear in /output/.",
-        "expected_files": [
-            f"{model_slug}_bottom.stl",
-            f"{model_slug}_lid.stl",
-            f"{model_slug}_pcb.stl",
-            f"{model_slug}_shell.blend",
-        ],
+        "geometry_file": geom_path.name,
+        "expected_files": expected,
         "log_file": f"{model_slug}_blender.log",
     }
 
@@ -621,6 +661,79 @@ def discover_printers():
     """Scan local network for 3D printers."""
     found = discover_printers_lan(timeout_s=4)
     return {"status": "ok", "found": found, "count": len(found)}
+
+
+# ---------------------------------------------------------------------------
+# Server-side saved builds (JSON under data/saved_builds/)
+# Replaces the old localStorage saves: a build saved here can be loaded
+# from any browser/device that can reach this server.
+# ---------------------------------------------------------------------------
+
+def _saved_build_path(name: str) -> Path:
+    """Map a user-supplied build name to a safe file inside SAVED_BUILDS_DIR."""
+    import re
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("._")
+    if not slug:
+        raise HTTPException(status_code=400, detail="Invalid build name")
+    path = SAVED_BUILDS_DIR / f"{slug}.json"
+    # Defence in depth: the resolved path must stay inside the directory
+    try:
+        path.resolve().relative_to(SAVED_BUILDS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid build name")
+    return path
+
+
+@app.get("/api/saved-builds")
+def list_saved_builds():
+    """List server-side saved builds (metadata only)."""
+    builds = []
+    for f in sorted(SAVED_BUILDS_DIR.glob("*.json")):
+        try:
+            data = json.loads(f.read_text())
+        except Exception:
+            continue
+        builds.append({
+            "name": data.get("name", f.stem),
+            "saved_at": data.get("saved_at"),
+            "model": (data.get("spec") or {}).get("model"),
+            "board_mm": (
+                f"{(data.get('spec') or {}).get('board_width_mm', '—')}"
+                f"×{(data.get('spec') or {}).get('board_height_mm', '—')}"
+            ),
+        })
+    return {"builds": builds, "count": len(builds)}
+
+
+@app.get("/api/saved-builds/{name}")
+def get_saved_build(name: str):
+    path = _saved_build_path(name)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Saved build not found")
+    return json.loads(path.read_text())
+
+
+@app.post("/api/saved-builds")
+def save_build(req: SavedBuildRequest):
+    path = _saved_build_path(req.name)
+    from datetime import datetime, timezone
+    data = {
+        "name": req.name,
+        "spec": req.spec, "geom": req.geom, "build": req.build,
+        "specs": req.specs, "pinout": req.pinout,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path.write_text(json.dumps(data, indent=2))
+    return {"status": "ok", "name": req.name, "saved_at": data["saved_at"]}
+
+
+@app.delete("/api/saved-builds/{name}")
+def delete_saved_build(name: str):
+    path = _saved_build_path(name)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Saved build not found")
+    path.unlink()
+    return {"status": "ok", "deleted": name}
 
 
 # ---------------------------------------------------------------------------
