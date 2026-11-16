@@ -43,10 +43,7 @@ from crawler.device_crawler import (
     GPIO_HEADER_VARIANTS, COMMON_COMPONENT_HEIGHTS,
 )
 from parser.dimension_math import DimensionMath, waveshare_hat_math_summary
-from parser.render_plan import (
-    build_render_plan, canonical_design,
-    design_hash as render_design_hash,
-)
+from parser.render_plan import build_render_plan, resolve_design
 from modular.modular_entities import HandheldBuild
 from specs.assembly_specs import AssemblySpecGenerator
 from specs.pinout_engine import (
@@ -521,29 +518,25 @@ def generate_report(req: ReportRequest):
     try:
         slug = req.device_name.lower().replace(" ", "_")
         pdf_path = str(OUTPUT_DIR / f"{slug}_design_report.pdf")
-        # Requirement 6b: §7 embeds assembly images ONLY from this
-        # design's hash-keyed directory — or, as a rescue, from a
-        # directory rendered for the same canonical DESIGN under a
-        # different hash (sets rendered before the canonical-design
-        # hash existed, whose spec provenance has since drifted).
-        design_hash = render_design_hash(req.spec, req.selection)
-        images_hash = design_hash
-        images_dir = OUTPUT_DIR / "report_images" / design_hash
-        if not any(images_dir.glob("step_*.png")):
-            rescued = _fallback_images_dir(req.spec, req.selection,
-                                           design_hash)
-            if rescued is not None:
-                images_hash, images_dir = rescued
+        # Requirement 6b + consolidation: §7 embeds assembly images
+        # ONLY from this design's directory, where the design ID
+        # comes from the single derivation (resolve_design) — the
+        # same derivation the render side used. Legacy image sets
+        # are re-keyed to it by _consolidate_image_store().
+        _consolidate_image_store()
+        resolved = _resolve(req.spec, req.selection)
+        design_hash = resolved["design_hash"]
         gen = PDFReportGenerator(
             device_name    = req.device_name,
-            spec           = req.spec,
+            spec           = resolved["spec"],
             geom           = req.geom,
             pinout         = req.pinout,
             firmware_arch  = req.firmware_arch,
             assembly_specs = req.assembly_specs,
             output_path    = pdf_path,
-            design_hash    = images_hash,
-            images_dir     = str(images_dir),
+            design_hash    = design_hash,
+            images_dir     = str(OUTPUT_DIR / "report_images"
+                                 / design_hash),
         )
         gen.generate()
         return {
@@ -551,7 +544,7 @@ def generate_report(req: ReportRequest):
             "pdf_file":  Path(pdf_path).name,
             "pdf_path":  pdf_path,
             "design_hash": design_hash,
-            "images_design_hash": images_hash,
+            "images_design_hash": design_hash,
         }
     except Exception as e:
         logger.exception("PDF generation failed")
@@ -569,38 +562,73 @@ def _report_image_dir(design_hash: str) -> Path:
     return OUTPUT_DIR / "report_images" / design_hash
 
 
-def _fallback_images_dir(spec, selection, own_hash: str):
-    """Rescue an image set rendered for the same DESIGN under a
-    different hash. Scans the saved render plans, compares canonical
-    designs (provenance-free), and returns (hash, dir) of the first
-    plan whose design matches AND whose image directory actually
-    holds PNGs. Returns None when nothing matches — the report then
-    honestly notes that no images were generated."""
-    try:
-        target = canonical_design(spec, selection)
-    except Exception:
-        return None
+def _resolve(spec, selection):
+    """The one derivation, with the server's registries — every
+    identity decision in this file goes through here."""
+    return resolve_design(spec, selection,
+                          _load_registry("modules"),
+                          _load_registry("power_sources"),
+                          GPIO_HEADER_VARIANTS)
+
+
+_IMAGE_STORE_CONSOLIDATED = False
+
+
+def _consolidate_image_store():
+    """One-time re-keying of the on-disk image store (consolidation
+    P3): plans written before the single derivation carry snapshot
+    hashes. Each stored plan's (spec, canonical selection) is run
+    through resolve_design and its image directory renamed to the
+    consolidated design ID, so sets rendered earlier — e.g. the
+    Pi's 9 CYCLES frames — belong to the same identity the report
+    now computes. Idempotent; runs once per process."""
+    global _IMAGE_STORE_CONSOLIDATED
+    if _IMAGE_STORE_CONSOLIDATED:
+        return
+    _IMAGE_STORE_CONSOLIDATED = True
     for plan_path in sorted(OUTPUT_DIR.glob("report_plan_*.json")):
         try:
             plan = json.loads(plan_path.read_text())
-        except Exception:
-            continue
-        other = plan.get("design_hash")
-        if not other or other == own_hash:
-            continue
-        try:
-            if canonical_design(plan.get("spec") or {},
-                                plan.get("selection")) != target:
+            old_h = plan.get("design_hash")
+            if not old_h:
                 continue
+            sel = plan.get("selection") or {}
+            choices = {
+                "brain_id": sel.get("brain_id"),
+                "module_ids": sel.get("module_ids") or [],
+                "power_source_id": sel.get("power_source_id"),
+                "camera_zone": sel.get("camera_zone"),
+                "header_variant": sel.get("header_variant"),
+            }
+            new_h = _resolve(plan.get("spec") or {},
+                             choices)["design_hash"]
+            if new_h == old_h and plan.get("choices") is not None:
+                continue
+            plan["design_hash"] = new_h
+            plan["choices"] = choices
+            if new_h != old_h:
+                old_dir = _report_image_dir(old_h)
+                new_dir = _report_image_dir(new_h)
+                if (old_dir.exists()
+                        and any(old_dir.glob("step_*.png"))
+                        and not new_dir.exists()):
+                    old_dir.rename(new_dir)
+                    man = new_dir / "manifest.json"
+                    if man.exists():
+                        m = json.loads(man.read_text())
+                        m["design_hash"] = new_h
+                        man.write_text(json.dumps(m, indent=2))
+                (OUTPUT_DIR / f"report_plan_{new_h}.json").write_text(
+                    json.dumps(plan, indent=2))
+                plan_path.unlink(missing_ok=True)
+                logger.info(
+                    f"[Consolidate] image set re-keyed {old_h} → "
+                    f"{new_h}")
+            else:
+                plan_path.write_text(json.dumps(plan, indent=2))
         except Exception:
-            continue
-        other_dir = _report_image_dir(other)
-        if any(other_dir.glob("step_*.png")):
-            logger.info(
-                f"[Report] design {own_hash}: embedding images "
-                f"rendered under {other} (same canonical design)")
-            return other, other_dir
-    return None
+            logger.exception("[Consolidate] plan re-key failed: %s",
+                             plan_path)
 
 
 # Engine fallback chain (Pi errata, Blender 5.2.2): the imaging run
@@ -655,12 +683,16 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
     force=true (what the Report tab's button sends) an already-
     rendered design is rendered again instead of answered 'ready'.
     """
+    _consolidate_image_store()
     steps = (req.specs or {}).get("assembly_steps", [])
     plan = build_render_plan(
         req.spec, req.geom, steps,
         selection=req.selection,
         brains=_load_registry("brains"),
         output_root=str(OUTPUT_DIR.resolve()),
+        modules=_load_registry("modules"),
+        power_sources=_load_registry("power_sources"),
+        header_variants=GPIO_HEADER_VARIANTS,
     )
     h = plan["design_hash"]
     img_dir = _report_image_dir(h)
@@ -792,6 +824,24 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
             "message": "Blender imaging job queued.",
             "status_url": f"/api/report-images/status/{h}",
             **base}
+
+
+class DesignIdRequest(BaseModel):
+    spec: dict
+    selection: Optional[dict] = None
+
+
+@app.post("/api/design-id")
+def design_id(req: DesignIdRequest):
+    """The design's identity, from the single derivation — the UI
+    shows this so a design change (and whether images exist for
+    THIS design) is visible before any PDF is generated."""
+    _consolidate_image_store()
+    h = _resolve(req.spec, req.selection)["design_hash"]
+    img_dir = _report_image_dir(h)
+    present = (sum(1 for _ in img_dir.glob("step_*.png"))
+               if img_dir.exists() else 0)
+    return {"design_hash": h, "images_present": present}
 
 
 @app.get("/api/report-images/status/{design_hash}")
