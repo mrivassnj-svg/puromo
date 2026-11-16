@@ -3838,7 +3838,7 @@ async function generateReportImages(){
     const d = await r.json();
     if (d.design_hash) reportImagesHash = d.design_hash;
     if (d.status === 'ready') {
-      setReportImagesStatus(`Assembly images: <b style="color:var(--green)">ready</b> — ${d.images_present}/${d.frames} images, design matches. Generate the PDF to embed them in §7.`);
+      setReportImagesStatus(`Assembly images: <b style="color:var(--green)">ready</b> — ${d.images_present}/${d.frames} images${d.engine ? ' (' + d.engine + ')' : ''}, design matches. Generate the PDF to embed them in §7.`);
     } else if (d.status === 'unavailable') {
       setReportImagesStatus(`Assembly images: <b>Blender unavailable</b> on this server — ${d.reason || ''}`);
     } else if (d.status === 'queued') {
@@ -3872,7 +3872,7 @@ async function refreshReportImagesStatus(){
     const stop = () => { if (reportImagesTimer) { clearInterval(reportImagesTimer); reportImagesTimer = null; } };
     if (d.status === 'ready') {
       stop();
-      setReportImagesStatus(`Assembly images: <b style="color:var(--green)">ready</b> — ${d.images_present}/${d.frames} images, design matches (hash ${d.design_hash}). Generate the PDF to embed them in §7.`);
+      setReportImagesStatus(`Assembly images: <b style="color:var(--green)">ready</b> — ${d.images_present}/${d.frames} images${d.engine ? ' (' + d.engine + ')' : ''}, design matches (hash ${d.design_hash}). Generate the PDF to embed them in §7.`);
     } else if (d.status === 'generating') {
       setReportImagesStatus(`Assembly images: <b>generating…</b> ${d.images_present}/${d.frames} so far`);
     } else if (d.status === 'unavailable') {

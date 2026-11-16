@@ -554,6 +554,48 @@ def _report_image_dir(design_hash: str) -> Path:
     return OUTPUT_DIR / "report_images" / design_hash
 
 
+# Engine fallback chain (Pi errata, Blender 5.2.2): the imaging run
+# died natively inside EEVEE — a GPU/OpenGL segfault in background
+# mode cannot be caught in-process — so the job retries the whole
+# Blender process with the next engine. The first engine to produce
+# the full frame set is cached on disk and tried first next time.
+REPORT_IMAGE_ENGINES = ["EEVEE", "WORKBENCH", "CYCLES"]
+ENGINE_CACHE_PATH = OUTPUT_DIR / "report_images" / ".engine_cache"
+
+
+def _read_engine_cache():
+    try:
+        name = ENGINE_CACHE_PATH.read_text().strip().upper()
+    except Exception:
+        return None
+    return name if name in REPORT_IMAGE_ENGINES else None
+
+
+def _write_engine_cache(engine: str) -> None:
+    try:
+        ENGINE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ENGINE_CACHE_PATH.write_text(engine + "\n")
+    except Exception as exc:
+        logger.warning(f"[ReportImages] engine cache write failed: {exc}")
+
+
+def _engine_attempt_order() -> list:
+    cached = _read_engine_cache()
+    order = [cached] if cached else []
+    return order + [e for e in REPORT_IMAGE_ENGINES if e not in order]
+
+
+def _manifest_engine(img_dir: Path):
+    """Engine recorded in the rendered images' manifest.json, if any
+    (persists across server restarts, unlike the job table)."""
+    try:
+        m = json.loads((img_dir / "manifest.json").read_text())
+        eng = str(m.get("engine") or "").strip().upper()
+        return eng if eng in REPORT_IMAGE_ENGINES else None
+    except Exception:
+        return None
+
+
 @app.post("/api/report-images")
 async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
     """
@@ -587,9 +629,12 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
                           "pipeline (assemble-specs) first.",
                 **base}
     if present == total:
+        eng = _manifest_engine(img_dir)
         return {"status": "ready",
                 "message": "Assembly images already rendered for "
-                           "this design.",
+                           "this design."
+                           + (f" ({eng})" if eng else ""),
+                "engine": eng,
                 **base}
     if not BLENDER_ON_PATH:
         return {"status": "unavailable",
@@ -606,28 +651,48 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
     REPORT_IMAGE_JOBS[h] = {"status": "generating"}
 
     def run_images():
-        cmd = [BLENDER_CMD, "--background", "--python", str(script),
-               "--", "--plan", str(plan_path)]
-        logger.info(f"[ReportImages] {' '.join(cmd)}")
-        try:
-            result = subprocess.run(cmd, capture_output=True,
-                                    text=True, timeout=1200)
-            tail = result.stdout + "\n" + result.stderr
-        except Exception as exc:  # job could not even start
-            tail = f"imaging job failed to run: {exc}"
+        # Process-level engine fallback chain: each attempt is a
+        # fresh Blender process (a native crash in one engine cannot
+        # be caught, only outlived). Partial output is kept — the
+        # status logic reports the best attempt's count honestly.
         log_path = OUTPUT_DIR / f"report_images_{h}.log"
-        log_path.write_text(tail)
-        got = sum(1 for f in plan["frames"]
-                  if (img_dir / f["filename"]).exists())
-        if got == total:
-            REPORT_IMAGE_JOBS[h] = {"status": "ready"}
+        chunks = []
+        best, best_engine = 0, None
+        for attempt, engine in enumerate(_engine_attempt_order(), 1):
+            cmd = [BLENDER_CMD, "--background", "--python", str(script),
+                   "--", "--plan", str(plan_path), "--engine", engine]
+            logger.info(f"[ReportImages] attempt {attempt} "
+                        f"engine={engine}: {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, capture_output=True,
+                                        text=True, timeout=1200)
+                tail = result.stdout + "\n" + result.stderr
+            except Exception as exc:  # attempt could not even start
+                tail = f"imaging job failed to run: {exc}"
+            got = sum(1 for f in plan["frames"]
+                      if (img_dir / f["filename"]).exists())
+            chunks.append(f"===== attempt {attempt} engine={engine}"
+                          f" -> {got}/{total} images =====\n{tail}")
+            logger.info(f"[ReportImages] {h} attempt {attempt} "
+                        f"({engine}): {got}/{total} images")
+            if got > best:
+                best, best_engine = got, engine
+            if got == total:
+                _write_engine_cache(engine)
+                break
+        log_path.write_text("\n".join(chunks))
+        if best == total:
+            REPORT_IMAGE_JOBS[h] = {"status": "ready",
+                                    "engine": best_engine,
+                                    "images_present": best}
         else:
             REPORT_IMAGE_JOBS[h] = {
                 "status": "error",
-                "detail": f"Blender produced {got}/{total} images — "
+                "engine": best_engine,
+                "images_present": best,
+                "detail": f"Blender produced {best}/{total} images — "
                           f"see report_images_{h}.log",
             }
-        logger.info(f"[ReportImages] {h}: {got}/{total} images")
 
     bg.add_task(run_images)
     return {"status": "queued",
@@ -683,6 +748,7 @@ def report_images_status(design_hash: str):
         "images": present,
         "images_present": len(present),
         "frames": total,
+        "engine": job.get("engine") or _manifest_engine(img_dir),
         "detail": job.get("detail"),
         "blender_available": BLENDER_ON_PATH,
     }
