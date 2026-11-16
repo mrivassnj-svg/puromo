@@ -19,6 +19,7 @@ Endpoints:
 """
 
 import os
+import re
 import sys
 import json
 import shutil
@@ -42,6 +43,7 @@ from crawler.device_crawler import (
     GPIO_HEADER_VARIANTS, COMMON_COMPONENT_HEIGHTS,
 )
 from parser.dimension_math import DimensionMath, waveshare_hat_math_summary
+from parser.render_plan import build_render_plan, design_hash as render_design_hash
 from modular.modular_entities import HandheldBuild
 from specs.assembly_specs import AssemblySpecGenerator
 from specs.pinout_engine import (
@@ -72,6 +74,10 @@ OUTPUT_DIR  = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 BLENDER_CMD = shutil.which("blender") or "blender"
+# Honest availability: BLENDER_CMD falls back to the bare name, so
+# detection must consult PATH directly (Requirement 6b — the
+# report-images endpoint reports 'unavailable', never fake images).
+BLENDER_ON_PATH = shutil.which("blender") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +121,15 @@ class ReportRequest(BaseModel):
     pinout:        dict
     firmware_arch: dict
     assembly_specs: dict
+    # Framework design state (Requirement 6b): part of the design's
+    # hash identity, so §7 embeds only this design's images.
+    selection:     Optional[dict] = None
+
+class ReportImagesRequest(BaseModel):
+    spec:      dict
+    geom:      dict
+    specs:     dict
+    selection: Optional[dict] = None
 
 class PrintPackageRequest(BaseModel):
     model_name:   str
@@ -502,6 +517,9 @@ def generate_report(req: ReportRequest):
     try:
         slug = req.device_name.lower().replace(" ", "_")
         pdf_path = str(OUTPUT_DIR / f"{slug}_design_report.pdf")
+        # Requirement 6b: §7 embeds assembly images ONLY from this
+        # design's hash-keyed directory.
+        design_hash = render_design_hash(req.spec, req.selection)
         gen = PDFReportGenerator(
             device_name    = req.device_name,
             spec           = req.spec,
@@ -510,16 +528,160 @@ def generate_report(req: ReportRequest):
             firmware_arch  = req.firmware_arch,
             assembly_specs = req.assembly_specs,
             output_path    = pdf_path,
+            design_hash    = design_hash,
+            images_dir     = str(OUTPUT_DIR / "report_images" / design_hash),
         )
         gen.generate()
         return {
             "status":    "ok",
             "pdf_file":  Path(pdf_path).name,
             "pdf_path":  pdf_path,
+            "design_hash": design_hash,
         }
     except Exception as e:
         logger.exception("PDF generation failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Report assembly images (Requirement 6b) ─────────────────────────
+# In-memory job table, mirroring the /api/generate-3d background
+# pattern. Images themselves live on disk under
+# output/report_images/<design_hash>/ and outlive the job table.
+REPORT_IMAGE_JOBS: dict = {}
+
+
+def _report_image_dir(design_hash: str) -> Path:
+    return OUTPUT_DIR / "report_images" / design_hash
+
+
+@app.post("/api/report-images")
+async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
+    """
+    Build the render plan for this design and, if Blender is
+    available, queue the imaging script (same pattern as
+    /api/generate-3d). If Blender is NOT available, say so —
+    status 'unavailable' — and never fake images.
+    """
+    steps = (req.specs or {}).get("assembly_steps", [])
+    plan = build_render_plan(
+        req.spec, req.geom, steps,
+        selection=req.selection,
+        brains=_load_registry("brains"),
+        output_root=str(OUTPUT_DIR.resolve()),
+    )
+    h = plan["design_hash"]
+    img_dir = _report_image_dir(h)
+    total = len(plan["frames"])
+    present = sum(1 for f in plan["frames"]
+                  if (img_dir / f["filename"]).exists())
+    base = {
+        "design_hash": h,
+        "frames": total,
+        "images_present": present,
+        "image_dir": f"report_images/{h}",
+        "blender_available": BLENDER_ON_PATH,
+    }
+    if total == 0:
+        return {"status": "error",
+                "reason": "No assembly steps in the specs — run the "
+                          "pipeline (assemble-specs) first.",
+                **base}
+    if present == total:
+        return {"status": "ready",
+                "message": "Assembly images already rendered for "
+                           "this design.",
+                **base}
+    if not BLENDER_ON_PATH:
+        return {"status": "unavailable",
+                "reason": "Blender executable not found on the "
+                          "server PATH, so assembly images cannot "
+                          "be rendered here. The PDF report still "
+                          "generates — its assembly section will "
+                          "note that images were not generated.",
+                **base}
+
+    plan_path = OUTPUT_DIR / f"report_plan_{h}.json"
+    plan_path.write_text(json.dumps(plan, indent=2))
+    script = Path(__file__).parent / "blender_gen" / "blender_report_images.py"
+    REPORT_IMAGE_JOBS[h] = {"status": "generating"}
+
+    def run_images():
+        cmd = [BLENDER_CMD, "--background", "--python", str(script),
+               "--", "--plan", str(plan_path)]
+        logger.info(f"[ReportImages] {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, capture_output=True,
+                                    text=True, timeout=1200)
+            tail = result.stdout + "\n" + result.stderr
+        except Exception as exc:  # job could not even start
+            tail = f"imaging job failed to run: {exc}"
+        log_path = OUTPUT_DIR / f"report_images_{h}.log"
+        log_path.write_text(tail)
+        got = sum(1 for f in plan["frames"]
+                  if (img_dir / f["filename"]).exists())
+        if got == total:
+            REPORT_IMAGE_JOBS[h] = {"status": "ready"}
+        else:
+            REPORT_IMAGE_JOBS[h] = {
+                "status": "error",
+                "detail": f"Blender produced {got}/{total} images — "
+                          f"see report_images_{h}.log",
+            }
+        logger.info(f"[ReportImages] {h}: {got}/{total} images")
+
+    bg.add_task(run_images)
+    return {"status": "queued",
+            "message": "Blender imaging job queued.",
+            "status_url": f"/api/report-images/status/{h}",
+            **base}
+
+
+@app.get("/api/report-images/status/{design_hash}")
+def report_images_status(design_hash: str):
+    """Status of a design's assembly images:
+    ready / generating / not_generated / unavailable / error."""
+    if not re.fullmatch(r"[0-9a-f]{16}", design_hash or ""):
+        raise HTTPException(status_code=404,
+                            detail="unknown design hash")
+    img_dir = _report_image_dir(design_hash)
+    filenames: List[str] = []
+    plan_path = OUTPUT_DIR / f"report_plan_{design_hash}.json"
+    if plan_path.exists():
+        try:
+            plan = json.loads(plan_path.read_text())
+            filenames = [f["filename"] for f in plan.get("frames", [])]
+        except Exception:
+            filenames = []
+    if not filenames:
+        manifest = img_dir / "manifest.json"
+        if manifest.exists():
+            try:
+                m = json.loads(manifest.read_text())
+                filenames = [f["filename"] for f in m.get("frames", [])]
+            except Exception:
+                filenames = []
+    present = [fn for fn in filenames if (img_dir / fn).exists()]
+    total = len(filenames)
+    job = REPORT_IMAGE_JOBS.get(design_hash) or {}
+    if job.get("status") == "generating":
+        status = "generating"
+    elif total and len(present) == total:
+        status = "ready"
+    elif job.get("status") == "error":
+        status = "error"
+    elif not BLENDER_ON_PATH and not present:
+        status = "unavailable"
+    else:
+        status = "not_generated"
+    return {
+        "status": status,
+        "design_hash": design_hash,
+        "images": present,
+        "images_present": len(present),
+        "frames": total,
+        "detail": job.get("detail"),
+        "blender_available": BLENDER_ON_PATH,
+    }
 
 
 # ── Print Package ───────────────────────────────────────────────────────────

@@ -296,7 +296,9 @@ class PDFReportGenerator:
                  pinout: dict,
                  firmware_arch: dict,
                  assembly_specs: dict,
-                 output_path: str):
+                 output_path: str,
+                 design_hash: str = "",
+                 images_dir: Optional[str] = None):
         self.device_name    = device_name
         self.spec           = spec
         self.geom           = geom
@@ -304,6 +306,12 @@ class PDFReportGenerator:
         self.fw             = firmware_arch
         self.asm            = assembly_specs
         self.output_path    = output_path
+        # Requirement 6b: assembly-step images live under
+        # output/report_images/<design_hash>/ — §7 looks them up
+        # ONLY there, so one design's renders can never illustrate
+        # another design's report.
+        self.design_hash    = design_hash
+        self.images_dir     = images_dir
         self.st             = _styles()
 
     def generate(self) -> str:
@@ -769,13 +777,50 @@ class PDFReportGenerator:
         story.append(t2)
         story.append(Spacer(1,3*mm))
 
-        # Assembly steps
+        # Assembly steps — each with its rendered image when one
+        # exists for THIS design (Requirement 6b: the images are the
+        # visual SOP). Lookup is strictly inside this design's
+        # hash-keyed image directory.
         story.append(Paragraph("Step-by-Step Assembly", st["h2"]))
-        for step in a.get("assembly_steps",[]):
+        steps = a.get("assembly_steps",[])
+        img_paths = []
+        for s in steps:
+            p = None
+            if self.images_dir:
+                try:
+                    fname = f"step_{int(s.get('step', 0)):02d}.png"
+                except (TypeError, ValueError):
+                    fname = None
+                if fname:
+                    cand = Path(self.images_dir) / fname
+                    if cand.exists():
+                        p = cand
+            img_paths.append(p)
+        have = sum(1 for p in img_paths if p)
+        if steps and have == 0:
+            story.append(Paragraph(
+                "<i>Assembly images not generated for this design yet "
+                "— generate them from the Report tab "
+                "(requires Blender).</i>",
+                st["body"]))
+            story.append(Spacer(1,2*mm))
+        elif steps and have < len(steps):
+            story.append(Paragraph(
+                f"<i>Assembly images: {have} of {len(steps)} steps "
+                "have an image for this design — regenerate them "
+                "from the Report tab to complete the set "
+                "(requires Blender).</i>",
+                st["body"]))
+            story.append(Spacer(1,2*mm))
+        for step, img in zip(steps, img_paths):
             story.append(Paragraph(
                 f"<b>Step {step['step']}: {step['title']}</b>",
                 st["h3"]
             ))
+            if img:
+                story.append(Image(str(img), width=110*mm,
+                                   height=82.5*mm, hAlign="CENTER"))
+                story.append(Spacer(1,2*mm))
             story.append(Paragraph(step["detail"], st["body"]))
 
         story.append(PageBreak())
