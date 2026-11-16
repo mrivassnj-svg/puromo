@@ -136,6 +136,19 @@ class ShellGeometry:
     ppi:             float = 0.0
     display_diagonal_mm: float = 0.0
 
+    # Camera aperture (in lid) — "the eyes" (framework R2a). Empty (r=0)
+    # unless the spec carries a camera_zone.
+    camera_aperture: Circle = field(default_factory=lambda: Circle(0, 0, 0))
+
+    # Battery bay footprint in the bottom case (XY rect, depth = pack
+    # thickness). Empty (w=0) unless the spec selects a battery.
+    battery_bay: Rect = field(default_factory=Rect)
+
+    # Overlap map (framework R5): physical interferences between placed
+    # elements, each {a, b, cx, cy, r} in shell coordinates. The pre-print
+    # safeguard renders these in the reserved conflict colour.
+    overlaps: List[dict] = field(default_factory=list)
+
     # Assembly notes
     assembly_notes: List[str] = field(default_factory=list)
 
@@ -168,6 +181,9 @@ class DimensionMath:
         self._compute_joystick_aperture(g)
         self._compute_snap_fits(g)
         self._compute_ribs(g)
+        self._compute_camera_aperture(g)
+        self._compute_battery_bay(g)
+        g.overlaps = self._compute_overlaps(g)
         self._generate_assembly_notes(g)
         return g
 
@@ -456,6 +472,136 @@ class DimensionMath:
     # -----------------------------------------------------------------------
     # Step 10: compile all assembly notes into geometry
     # -----------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------
+    # Camera aperture — "the eyes" (framework R2a)
+    # -----------------------------------------------------------------------
+
+    CAMERA_ZONES = {
+        "front_top":    "front-top edge",
+        "front_bottom": "front-bottom edge",
+        "lid_centre":   "lid centre",
+    }
+
+    def _compute_camera_aperture(self, g: ShellGeometry):
+        """Camera lens aperture in the lid, from spec['camera_zone'].
+        Zones are shell-coordinate mounting choices made in the Placement
+        tab. The CSI-2 ribbon route is recorded as an assembly note; whether
+        the chosen zone is SAFE is decided by the overlap map (R5)."""
+        zone = self.s.get("camera_zone")
+        if zone not in self.CAMERA_ZONES:
+            return
+        d = self._f("camera_aperture_d_mm", 11.0)
+        sw, sh = g.shell_width_mm, g.shell_height_mm
+        if zone == "front_top":
+            cx, cy = sw / 2, sh - 10.0
+        elif zone == "front_bottom":
+            cx, cy = sw / 2, 10.0
+        else:  # lid_centre
+            cx, cy = sw / 2, sh / 2
+        g.camera_aperture = Circle(round(cx, 2), round(cy, 2), round(d / 2, 2))
+        # Ribbon run estimate: aperture centre → centre of the main board,
+        # where its CSI connector sits on this class of board.
+        bx = g.pcb_offset_x + self._f("board_width_mm") / 2
+        by = g.pcb_offset_y + self._f("board_height_mm") / 2
+        run = math.hypot(cx - bx, cy - by)
+        g.assembly_notes.append(
+            f"Camera (the eyes): aperture Ø{d} mm at the "
+            f"{self.CAMERA_ZONES[zone]} ({cx:.1f}, {cy:.1f}) mm. CSI-2 "
+            f"15-pin ribbon routes from the camera board to the main "
+            f"board's CSI connector — straight-line run ≈ {run:.0f} mm; "
+            "keep the ribbon clear of the battery bay, use a gentle bend "
+            "(radius ≥ 5 mm), and do not crease it."
+        )
+
+    # -----------------------------------------------------------------------
+    # Battery bay (framework R4) — footprint of the chosen pack in the
+    # bottom case, using the same +1 mm clearance as modular BottomCase.
+    # -----------------------------------------------------------------------
+
+    def _compute_battery_bay(self, g: ShellGeometry):
+        if not self.s.get("include_battery"):
+            return
+        bs = self.s.get("battery_size_mm") or [50, 20, 6]
+        w = float(bs[0]) + 1.0
+        h = float(bs[1]) + 1.0
+        d = float(bs[2]) if len(bs) > 2 else 6.0
+        x = (g.shell_width_mm - w) / 2
+        y = WALL_THICKNESS + 1.0
+        g.battery_bay = Rect(round(x, 2), round(y, 2), round(w, 2),
+                             round(h, 2), d)
+
+    # -----------------------------------------------------------------------
+    # Overlap map (framework R5) — physical interferences between placed
+    # elements, in shell XY coordinates. Layer rules: lid elements (display
+    # cutout, buttons, joystick, camera) are checked against each other;
+    # mounting bosses are full-height columns and are checked against
+    # everything; the battery bay sits in the bottom case and is checked
+    # against the bosses. Each overlap is {a, b, cx, cy, r}: the centre and
+    # radius of the conflicting zone, for the reserved-colour render marker.
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def _ov_circle_circle(n1, c1, n2, c2):
+        if c1.r <= 0 or c2.r <= 0:
+            return None
+        dist = math.hypot(c2.cx - c1.cx, c2.cy - c1.cy)
+        if dist >= c1.r + c2.r:
+            return None
+        pen = c1.r + c2.r - dist
+        return {"a": n1, "b": n2,
+                "cx": round((c1.cx + c2.cx) / 2, 2),
+                "cy": round((c1.cy + c2.cy) / 2, 2),
+                "r": round(max(1.5, pen / 2 + 1.0), 2)}
+
+    @staticmethod
+    def _ov_circle_rect(nc, c, nr, rect):
+        if c.r <= 0 or rect.w <= 0 or rect.h <= 0:
+            return None
+        nx = min(max(c.cx, rect.x), rect.x + rect.w)
+        ny = min(max(c.cy, rect.y), rect.y + rect.h)
+        dist = math.hypot(c.cx - nx, c.cy - ny)
+        if dist >= c.r:
+            return None
+        return {"a": nc, "b": nr,
+                "cx": round((c.cx + nx) / 2, 2),
+                "cy": round((c.cy + ny) / 2, 2),
+                "r": round(max(1.5, (c.r - dist) / 2 + 1.0), 2)}
+
+    def _compute_overlaps(self, g: ShellGeometry) -> List[dict]:
+        out = []
+
+        def add(hit):
+            if hit:
+                out.append(hit)
+
+        lid_circles = [(f"button_aperture_{i + 1}", c)
+                       for i, c in enumerate(g.button_apertures)]
+        if g.joystick_aperture.r > 0:
+            lid_circles.append(("joystick_aperture", g.joystick_aperture))
+        if g.camera_aperture.r > 0:
+            lid_circles.append(("camera_aperture", g.camera_aperture))
+
+        # Lid elements among themselves
+        for i in range(len(lid_circles)):
+            for j in range(i + 1, len(lid_circles)):
+                add(self._ov_circle_circle(lid_circles[i][0],
+                                           lid_circles[i][1],
+                                           lid_circles[j][0],
+                                           lid_circles[j][1]))
+        # Lid elements vs the display cutout
+        for name, c in lid_circles:
+            add(self._ov_circle_rect(name, c, "display_cutout",
+                                     g.display_cutout))
+        # Bosses (full-height columns) vs everything placed
+        for i, boss in enumerate(g.mounting_bosses):
+            bn = f"mounting_boss_{i + 1}"
+            for name, c in lid_circles:
+                add(self._ov_circle_circle(bn, boss, name, c))
+            add(self._ov_circle_rect(bn, boss, "display_cutout",
+                                     g.display_cutout))
+            add(self._ov_circle_rect(bn, boss, "battery_bay", g.battery_bay))
+        return out
 
     def _generate_assembly_notes(self, g: ShellGeometry):
         # Notes are already appended inline by each step above.
