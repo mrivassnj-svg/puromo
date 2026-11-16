@@ -243,15 +243,46 @@ def assemble_specs(req: SpecsRequest):
 @app.post("/api/generate-3d")
 async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
     """
-    Write a spec JSON then invoke Blender in background to produce STL files.
-    Returns immediately with job info; check /api/download/{filename} when ready.
+    Compute geometry via DimensionMath (single source of truth), write it
+    to a geometry JSON, then invoke Blender in background to produce STLs.
+    Blender consumes that geometry file — it does not recompute dimensions.
+    If Blender is not installed, returns status="skipped" instead of
+    queueing a job that cannot run.
     """
     model_slug = req.spec.get("model", "handheld").replace(" ", "_").lower()
     spec_path  = OUTPUT_DIR / f"{model_slug}_spec.json"
+    geom_path  = OUTPUT_DIR / f"{model_slug}_geometry.json"
 
     # Save spec for Blender to read
     with open(spec_path, "w") as f:
         json.dump(req.spec, f, indent=2)
+
+    # Backend geometry — the same dict /api/compute-geometry returns
+    try:
+        geom_dict = dataclasses.asdict(DimensionMath(req.spec).compute())
+    except Exception as e:
+        logger.exception("Geometry compute failed for Blender")
+        raise HTTPException(status_code=500, detail=str(e))
+    with open(geom_path, "w") as f:
+        json.dump(geom_dict, f, indent=2)
+
+    blender_available = shutil.which("blender") is not None
+    expected = [
+        f"{model_slug}_bottom.stl",
+        f"{model_slug}_lid.stl",
+        f"{model_slug}_pcb.stl",
+        f"{model_slug}_shell.blend",
+    ]
+    if not blender_available:
+        return {
+            "status": "skipped",
+            "reason": "Blender not found",
+            "blender_available": False,
+            "message": "Blender is not installed / not on PATH — stage skipped. Geometry JSON was still written.",
+            "geometry_file": geom_path.name,
+            "expected_files": expected,
+            "log_file": f"{model_slug}_blender.log",
+        }
 
     blender_script = Path(__file__).parent / "blender_gen" / "blender_shell_gen.py"
 
@@ -263,6 +294,7 @@ async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
             "--",
             "--spec",   str(spec_path),
             "--output", str(OUTPUT_DIR),
+            "--geometry", str(geom_path),
         ]
         logger.info(f"[Blender] {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -275,13 +307,10 @@ async def generate_3d(req: Generate3DRequest, bg: BackgroundTasks):
 
     return {
         "status": "queued",
+        "blender_available": True,
         "message": "Blender job queued. STL files will appear in /output/.",
-        "expected_files": [
-            f"{model_slug}_bottom.stl",
-            f"{model_slug}_lid.stl",
-            f"{model_slug}_pcb.stl",
-            f"{model_slug}_shell.blend",
-        ],
+        "geometry_file": geom_path.name,
+        "expected_files": expected,
         "log_file": f"{model_slug}_blender.log",
     }
 

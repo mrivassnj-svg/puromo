@@ -3,25 +3,29 @@ firmware_generator.py
 ---------------------
 Generates real, runnable firmware files for the handheld device.
 
-Output tree (under generated/<model_name>/):
+Output tree (under output/<model_name>/) — exactly what generate() emits:
   main.py                  — entry point, boot sequence, asyncio runner
   config.py                — all pin assignments, bus config, tunables
   event_bus.py             — typed EventBus (pub/sub)
-  drivers/
+  drivers/                 — 7 drivers (plus drivers/__init__.py)
     display_st7789.py      — ST7789 SPI display driver
-    display_ssd1306.py     — SSD1306 I2C OLED driver
+    backlight.py           — PWM backlight controller
     buttons.py             — debounced button driver with IRQ
     joystick.py            — MCP3008 ADC joystick driver
     battery.py             — voltage divider battery monitor
     imu_mpu6050.py         — MPU-6050 I2C IMU driver
     audio.py               — PWM audio / buzzer driver
-    neopixel.py            — WS2812B NeoPixel driver
-    backlight.py           — PWM backlight controller
   app/
     __init__.py
     app.py                 — Application base class
     state_machine.py       — Generic state machine
   README_FIRMWARE.md       — Architecture notes and flashing guide
+  firmware_manifest.json   — written separately by generate()
+
+That is 15 manifest files: 14 Python files + README_FIRMWARE.md, plus
+firmware_manifest.json on disk (16 files total). No SSD1306 or NeoPixel
+driver is generated (those names appear only in the dependency graph in
+firmware_engine.py, not in the emitted tree).
 """
 
 import os
@@ -1323,6 +1327,7 @@ generated/{spec.get("model","handheld").lower().replace(" ","_")}/
 ├── config.py                Pin assignments and tunable parameters
 ├── event_bus.py             Typed pub/sub EventBus (inter-module comms)
 ├── drivers/
+│   ├── __init__.py
 │   ├── display_st7789.py    ST7789 SPI display (init sequence + blit API)
 │   ├── backlight.py         PWM backlight controller
 │   ├── buttons.py           IRQ-driven debounced button driver
@@ -1330,9 +1335,12 @@ generated/{spec.get("model","handheld").lower().replace(" ","_")}/
 │   ├── battery.py           LiPo voltage monitor
 │   ├── imu_mpu6050.py       MPU-6050 6-DoF IMU
 │   └── audio.py             PWM tone + ALSA WAV player
-└── app/
-    ├── app.py               Application base class
-    └── state_machine.py     Generic async FSM
+├── app/
+│   ├── __init__.py
+│   ├── app.py               Application base class
+│   └── state_machine.py     Generic async FSM
+├── README_FIRMWARE.md       This file (15th manifest file)
+└── firmware_manifest.json   Manifest written separately (16th file on disk)
 ```
 
 ## Install Dependencies

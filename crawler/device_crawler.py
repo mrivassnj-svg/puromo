@@ -202,7 +202,7 @@ WAVESHARE_LCD_HATS = {
         "resolution_w": 240,
         "resolution_h": 240,
         "pixel_pitch_mm": 0.0975,
-        "ppi": 260.6,
+        "ppi": 261.09,  # canonical: sqrt(240^2+240^2)/1.3
         "gpio_header_pitch_mm": 2.54,
         "gpio_rows": 2,
         "gpio_cols": 20,
@@ -238,7 +238,7 @@ WAVESHARE_LCD_HATS = {
         "resolution_w": 240,
         "resolution_h": 320,
         "pixel_pitch_mm": 0.1275,
-        "ppi": 199.3,
+        "ppi": 200.0,  # canonical: sqrt(240^2+320^2)/2.0
         "gpio_header_pitch_mm": 2.54,
         "gpio_rows": 2,
         "gpio_cols": 20,
@@ -267,7 +267,7 @@ WAVESHARE_LCD_HATS = {
         "resolution_w": 240,
         "resolution_h": 240,
         "pixel_pitch_mm": round(23.4 / 240, 6),
-        "ppi": round((240 / 23.4) * 25.4, 2),
+        "ppi": 261.09,  # canonical: sqrt(240^2+240^2)/1.3 (not 25.4/pitch)
         "interface": "SPI",
         "controller_ic": "ST7789",
         "voltage_v": 3.3,
