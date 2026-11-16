@@ -3271,6 +3271,392 @@ function renderSavedBuilds() {
 
 // Render saved builds on DOMContentLoaded
 document.addEventListener('DOMContentLoaded', ()=>{ renderSavedBuilds(); });
+
+// ═══════════════════════════════════════════════════════════════
+//  FRAMEWORK (Requirements 1–5) — additive layer.
+//  Registries drive the Brain / Feature Modules / Power tabs; the
+//  design state below is folded into the EXISTING flow state
+//  (currentSpec + #spec-json) so the original pipeline, pinout,
+//  modular build and Blender paths consume it unchanged.
+// ═══════════════════════════════════════════════════════════════
+const designState = { brainId: null, moduleIds: [], powerSourceId: 'wired_usb', cameraZone: 'front_top' };
+let REGISTRIES = { brains: [], modules: [], power_sources: [] };
+let CAPABILITY = {};   // module_id -> {capable, reasons}
+let ALT_BRAINS  = {};  // module_id -> {brain_id, brain_name, preserves, selected_total}
+
+function brainById(id){ return REGISTRIES.brains.find(b=>b.id===id) || null; }
+function moduleById(id){ return REGISTRIES.modules.find(m=>m.id===id) || null; }
+function powerById(id){ return REGISTRIES.power_sources.find(p=>p.id===id) || null; }
+
+function jumpToTab(id){
+  const tabs = document.querySelectorAll('.tab');
+  for (const t of tabs){ if ((t.getAttribute('onclick')||'').includes("'"+id+"'")) { showTab(id, t); return; } }
+  showTab(id, null);
+}
+
+async function loadRegistries(){
+  try {
+    const r = await fetch(API+'/api/registries');
+    const d = await r.json();
+    if (d.status !== 'ok') return;
+    REGISTRIES = d;
+    renderBrainList();
+    renderPowerSources();
+    renderHeaderTable();
+    refreshModules();
+    refreshOverlapGate();
+  } catch(e) { /* registries unavailable — the original flow is unaffected */ }
+}
+document.addEventListener('DOMContentLoaded', loadRegistries);
+document.addEventListener('DOMContentLoaded', refreshBuildOptions);
+
+// ── Build Options tab (R3b): same save store as the Files tab ──
+function saveBuildFromOptions(){
+  const nameEl = document.getElementById('bo-slot-name');
+  const slotEl = document.getElementById('save-slot-name');
+  if (slotEl && nameEl) slotEl.value = nameEl.value;
+  saveBuild();
+  refreshBuildOptions();
+}
+function loadSaveFromOptions(i){ loadSave(i); refreshBuildOptions(); }
+function deleteSaveFromOptions(i){ deleteSave(i); refreshBuildOptions(); }
+function refreshBuildOptions(){
+  const el = document.getElementById('bo-saved-list');
+  if (!el) return;
+  const saves = getSaves();
+  if (!saves.length) {
+    el.innerHTML = '<span style="font-size:.8rem;color:var(--muted)">No saved builds yet. Design something, then save it here — it also appears in the Files tab.</span>';
+    return;
+  }
+  el.innerHTML = saves.map((s,i)=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:7px 10px;margin-bottom:5px">
+      <div>
+        <span style="font-weight:600;font-size:.83rem">${s.name}</span>
+        <span style="color:var(--muted);font-size:.72rem;margin-left:8px">${s.spec?.board_width_mm||'—'}×${s.spec?.board_height_mm||'—'}mm</span>
+        <div style="color:var(--muted);font-size:.72rem">${new Date(s.saved_at).toLocaleDateString()}</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <button class="btn btn-secondary" style="padding:3px 8px;font-size:.72rem" onclick="loadSaveFromOptions(${i})">Load</button>
+        <button class="btn btn-red" style="padding:3px 8px;font-size:.72rem" onclick="deleteSaveFromOptions(${i})">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+// ── Brain tab (R1/R2b): main board first ──
+function renderBrainList(){
+  const el = document.getElementById('brain-list');
+  if (!el) return;
+  el.innerHTML = REGISTRIES.brains.map(b=>{
+    const ifc = b.interfaces || {};
+    const chips = [
+      ifc.gpio_header ? 'GPIO 40-pin' : null,
+      ifc.csi ? `CSI ×${ifc.csi}` : 'CSI ✗',
+      ifc.dsi ? `DSI ×${ifc.dsi}` : 'DSI ✗',
+      ifc.spi ? 'SPI' : null, ifc.i2c ? 'I2C' : null,
+    ].filter(Boolean).join(' · ');
+    const active = designState.brainId === b.id;
+    return `<div class="device-item ${active?'active':''}" style="min-width:200px;flex:1" onclick="selectBrain('${b.id}')">
+      <div class="dn">${active?'✓ ':''}${b.name}</div>
+      <div class="dm">${b.board_w_mm}×${b.board_h_mm} mm · ${chips}</div>
+      <div class="dm">Power in: ${b.power_input} · PSU rating ${b.max_current_ma} mA</div>
+    </div>`;
+  }).join('');
+}
+
+function selectBrain(id){
+  designState.brainId = id;
+  renderBrainList();
+  const b = brainById(id);
+  document.getElementById('brain-status').textContent =
+    `Main board: ${b.name} (${b.board_w_mm}×${b.board_h_mm} mm). Feature Modules are now mapped against this board. Add a HAT module there, or design brain-only below.`;
+  statusOk('Main board selected: ' + b.name);
+  refreshModules();
+  renderPowerSources();
+}
+
+// R2b: HATs are OPTIONAL. Brain-only = the board itself becomes the spec.
+async function useBrainOnly(){
+  const b = brainById(designState.brainId);
+  if (!b) { statusErr('Choose a main board first.'); return; }
+  designState.moduleIds = designState.moduleIds.filter(mid=>{ const m = moduleById(mid); return m && !m.hat; });
+  const sel = document.getElementById('header-variant');
+  const hv = (typeof headerVariants !== 'undefined' && sel) ? headerVariants[sel.value] : null;
+  currentSpec = {
+    model: b.name + ' (brain only)',
+    vendor: 'raspberrypi',
+    board_width_mm: b.board_w_mm,
+    board_height_mm: b.board_h_mm,
+    interface: 'GPIO',
+    compatible_boards: [b.name],
+    gpio_header_variant: sel ? sel.value : 'standard_11mm',
+    gpio_header_above_mm: hv ? hv.above_mm : 8.5,
+    gpio_header_below_mm: hv ? hv.below_mm : 3.0,
+    gpio_header_mated_gap_mm: hv ? hv.mated_gap_mm : 11.5,
+  };
+  document.getElementById('spec-json').value = JSON.stringify(currentSpec, null, 2);
+  syncSpecFromDesign();
+  await computeGeometry();
+  document.getElementById('brain-status').textContent =
+    `Brain-only design: the ${b.name} board itself is the device spec (${b.board_w_mm}×${b.board_h_mm} mm) — no HAT in the measurements. Geometry computed.`;
+  statusOk('Brain-only spec loaded for ' + b.name);
+  refreshModules();
+}
+
+// ── Design state → existing flow state ──
+function syncSpecFromDesign(){
+  if (!currentSpec) return;
+  const keys = designState.moduleIds
+    .map(mid=>moduleById(mid))
+    .filter(m=>m && m.pinout_module)
+    .map(m=>m.pinout_module);
+  currentSpec.selected_modules = [...new Set(keys)];
+  if (designState.moduleIds.includes('camera_module_3')) {
+    currentSpec.camera_zone = designState.cameraZone;
+  } else {
+    delete currentSpec.camera_zone;
+  }
+  const ps = powerById(designState.powerSourceId);
+  if (ps && ps.bay) {
+    currentSpec.include_battery = true;
+    currentSpec.battery_size_mm = ps.dims_mm;
+  } else {
+    delete currentSpec.include_battery;
+    delete currentSpec.battery_size_mm;
+  }
+  document.getElementById('spec-json').value = JSON.stringify(currentSpec, null, 2);
+}
+
+// ── GPIO Header tab (R3c) ──
+function setNoHeader(){
+  const sel = document.getElementById('header-variant');
+  if (!sel) return;
+  sel.value = 'soldered_direct';
+  if (sel.onchange) sel.onchange();
+  statusOk('No header: soldered-direct variant selected (gap 1.0 mm).');
+}
+function renderHeaderTable(){
+  const el = document.getElementById('header-variant-table');
+  if (!el || typeof headerVariants === 'undefined' || !headerVariants) return;
+  const cur = document.getElementById('header-variant')?.value;
+  el.innerHTML = '<div class="section-hd">All header variants</div>' +
+    Object.entries(headerVariants).map(([k,v])=>`
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:6px 9px;border:1px solid var(--border);border-radius:5px;margin-bottom:4px;background:${k===cur?'rgba(79,142,247,.07)':'var(--surface)'}">
+        <span style="font-size:.8rem"><b>${v.label}</b>${k==='soldered_direct'?' — the “no header / not built in” choice':''}</span>
+        <span style="font-size:.75rem;color:var(--muted);font-family:monospace">above ${v.above_mm} · below ${v.below_mm} · gap ${v.mated_gap_mm} mm</span>
+      </div>`).join('');
+}
+
+// ── Feature Modules tab (R1) ──
+function moduleReqSummary(m){
+  const req = m.requires || {};
+  const parts = [];
+  Object.entries(req.interfaces || {}).forEach(([k,v])=>{
+    parts.push(typeof v === 'number' ? `${k.toUpperCase()} ×${v}` : k.replace('_',' '));
+  });
+  if (req.pins_ma) parts.push(req.pins_ma + ' mA');
+  if (req.footprint_w_mm) parts.push(`footprint ${req.footprint_w_mm}×${req.footprint_h_mm} mm`);
+  return parts.join(' · ') || 'no special requirements';
+}
+
+async function refreshModules(){
+  const gate = document.getElementById('modules-gate');
+  const list = document.getElementById('modules-list');
+  const summary = document.getElementById('modules-brain-summary');
+  const alt = document.getElementById('modules-alt');
+  if (!gate || !list) return;
+  const camCard = document.getElementById('camera-card');
+  if (camCard) camCard.style.display = designState.moduleIds.includes('camera_module_3') ? '' : 'none';
+  if (!designState.brainId) {
+    gate.style.display = '';
+    list.innerHTML = ''; summary.innerHTML = ''; alt.innerHTML = '';
+    return;
+  }
+  gate.style.display = 'none';
+  const b = brainById(designState.brainId);
+  summary.innerHTML = `Mapping against <b>${b.name}</b> (${b.board_w_mm}×${b.board_h_mm} mm, PSU rating ${b.max_current_ma} mA):`;
+  try {
+    const r = await fetch(API+'/api/capability', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ brain_id: designState.brainId,
+        module_ids: REGISTRIES.modules.map(m=>m.id),
+        selected_ids: designState.moduleIds }) });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      CAPABILITY = {}; d.results.forEach(x=>{ CAPABILITY[x.module_id] = x; });
+      ALT_BRAINS = d.alternatives || {};
+    }
+  } catch(e) { /* capability service unavailable — list still renders */ }
+  list.innerHTML = REGISTRIES.modules.map(m=>{
+    const cap = CAPABILITY[m.id];
+    const added = designState.moduleIds.includes(m.id);
+    const capable = cap ? cap.capable : null;
+    const badge = capable === null ? '<span class="tag">unknown</span>'
+      : capable ? '<span class="tag tag-green">capable</span>'
+      : '<span class="tag" style="background:#5b2333;color:#ff8fab">incapable</span>';
+    const reasons = (cap && !cap.capable)
+      ? `<div style="color:#ff8fab;font-size:.75rem;margin-top:3px">${cap.reasons.map(x=>'✗ '+x).join('<br>')}</div>` : '';
+    const altB = ALT_BRAINS[m.id];
+    const altHtml = altB ? `<div style="font-size:.75rem;margin-top:3px;color:var(--accent2)">Most probable alternative board: <b>${altB.brain_name}</b> — keeps ${altB.preserves}/${altB.selected_total} selected modules working. <a href="#" onclick="selectBrain('${altB.brain_id}');return false">Switch to it</a></div>` : '';
+    const btn = added
+      ? `<button class="btn btn-red" style="font-size:.72rem;padding:4px 10px" onclick="removeModule('${m.id}')">Remove</button>`
+      : `<button class="btn btn-green" style="font-size:.72rem;padding:4px 10px" ${capable===false?'disabled title="Incapable on this board — see the reason"':''} onclick="addModule('${m.id}')">Add</button>`;
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:5px;background:var(--surface)">
+      <div style="flex:1">
+        <span style="font-weight:600;font-size:.83rem">${m.name}</span> ${badge}
+        ${m.hat?'<span class="tag">HAT</span>':''}
+        <div style="font-size:.74rem;color:var(--muted)">${moduleReqSummary(m)}</div>
+        <div style="font-size:.7rem;color:var(--muted)">Source: ${m.source}</div>
+        ${reasons}${altHtml}
+      </div>
+      <div>${btn}</div>
+    </div>`;
+  }).join('');
+  const incapableSelected = designState.moduleIds.filter(mid=>CAPABILITY[mid] && !CAPABILITY[mid].capable);
+  alt.innerHTML = incapableSelected.length
+    ? `<div class="hint" style="color:#ff8fab">⚠ In the design but incapable on this board: ${incapableSelected.map(mid=>moduleById(mid)?.name||mid).join(', ')}. Remove them or switch boards.</div>` : '';
+}
+
+async function addModule(id){
+  const m = moduleById(id);
+  if (!m) return;
+  if (m.hat) {
+    // One HAT at a time: a new HAT replaces the previous HAT selection,
+    // then loads its verified device spec (registry key only).
+    designState.moduleIds = designState.moduleIds.filter(mid=>{ const mm = moduleById(mid); return !(mm && mm.hat); });
+    if (!designState.moduleIds.includes(id)) designState.moduleIds.push(id);
+    await doCrawl(m.spec_key);
+    syncSpecFromDesign();
+    await computeGeometry();
+    statusOk('HAT loaded: ' + m.name + ' — it is in the measurements from this first compute.');
+  } else {
+    if (!designState.moduleIds.includes(id)) designState.moduleIds.push(id);
+    syncSpecFromDesign();
+    if (currentSpec) await computeGeometry();
+    statusOk('Module added: ' + m.name);
+  }
+  refreshModules();
+  renderPowerSources();
+}
+
+async function removeModule(id){
+  designState.moduleIds = designState.moduleIds.filter(x=>x!==id);
+  syncSpecFromDesign();
+  if (currentSpec) await computeGeometry();
+  statusOk('Module removed: ' + (moduleById(id)?.name || id));
+  refreshModules();
+  renderPowerSources();
+}
+
+// ── Camera placement (R2a) ──
+async function setCameraZone(zone){
+  designState.cameraZone = zone;
+  syncSpecFromDesign();
+  if (currentSpec) await computeGeometry();
+  updateCameraStatus();
+}
+function updateCameraStatus(){
+  const el = document.getElementById('camera-status');
+  if (!el) return;
+  const cam = currentGeom?.camera_aperture;
+  if (!cam || !cam.r) { el.textContent = 'No camera aperture in the current geometry yet — compute geometry first.'; return; }
+  const hits = (currentGeom.overlaps || []).filter(o=>o.a==='camera_aperture' || o.b==='camera_aperture');
+  el.innerHTML = hits.length
+    ? `<span style="color:#ff2d78;font-weight:700">⚠ UNSAFE zone:</span> the aperture overlaps ${hits.map(o=>o.a==='camera_aperture'?o.b:o.a).join(', ')} — marked in the conflict colour in the render. Pick another zone or accept and acknowledge it at the Print tab.`
+    : `<span style="color:var(--green)">✓ SAFE zone:</span> aperture at (${cam.cx}, ${cam.cy}) mm clears the display cutout, bosses and buttons. Ribbon route is in the assembly notes (Geometry tab).`;
+}
+
+// ── Power tab (R4) ──
+function renderPowerSources(){
+  const el = document.getElementById('power-list');
+  if (!el) return;
+  const b = brainById(designState.brainId);
+  const pb = currentPinout?.power_budget;
+  const info = document.getElementById('power-budget-info');
+  if (info) info.innerHTML = pb
+    ? `Design power budget (from Pinout): modules ${pb.modules_total_ma} mA + host ${pb.host_tdp_ma} mA = <b>${pb.grand_total_ma} mA</b> (${pb.grand_total_w} W) · recommended PSU ${pb.recommended_psu_a} A · within the 4.5 A budget line: <b>${pb.within_budget?'yes':'NO'}</b>.`
+    : 'Power budget: run the pipeline (Pinout) to see the design\u2019s draw here.';
+  el.innerHTML = REGISTRIES.power_sources.map(p=>{
+    const active = designState.powerSourceId === p.id;
+    const detail = p.bay
+      ? `${p.dims_mm[0]}×${p.dims_mm[1]}×${p.dims_mm[2]} mm · ~${p.capacity_mah} mAh · bay rendered in Placement`
+      : `Powers the main board's own input${b?` (${b.power_input})`:''} · no bay, nothing to print for power`;
+    return `<div class="device-item ${active?'active':''}" style="margin-bottom:6px" onclick="selectPowerSource('${p.id}')">
+      <div class="dn">${active?'✓ ':''}${p.name}</div>
+      <div class="dm">${detail}</div>
+      <div class="dm">Source: ${p.source}</div>
+    </div>`;
+  }).join('');
+}
+
+async function selectPowerSource(id){
+  designState.powerSourceId = id;
+  const p = powerById(id);
+  // Drive the EXISTING battery flow: the sidebar controls the pipeline
+  // reads, plus the spec fields the geometry engine reads.
+  const inc = document.getElementById('inc-battery');
+  const bat = document.getElementById('bat-size');
+  if (p && p.bay) {
+    if (inc) inc.checked = true;
+    if (bat) bat.value = p.dims_mm.join(',');
+  } else {
+    if (inc) inc.checked = false;
+  }
+  syncSpecFromDesign();
+  if (currentSpec) await computeGeometry();
+  renderPowerSources();
+  statusOk(p && p.bay ? `Power source: ${p.name} — battery bay flow set (${p.dims_mm.join('×')} mm).` : 'Power source: wired — wire to outlet (USB). No battery required.');
+}
+
+// ── Wiring verification + triage (R2e/R2f) ──
+async function runPinoutVerify(silent){
+  const statusEl = document.getElementById('verify-status');
+  const checksEl = document.getElementById('verify-checks');
+  const triageEl = document.getElementById('triage-list');
+  if (!statusEl) return;
+  if (!currentSpec) { if (!silent) statusErr('No spec yet — load a device or run the pipeline first.'); return; }
+  try {
+    const r = await fetch(API+'/api/pinout/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ spec: currentSpec }) });
+    const d = await r.json();
+    if (d.status !== 'ok') throw new Error(d.detail || 'verify failed');
+    if (d.all_pass) {
+      statusEl.innerHTML = `<span style="color:var(--green);font-weight:700;font-size:.9rem">✓ Pinout mapping verified — ${d.passed}/${d.total} checks</span>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:#ff2d78;font-weight:700;font-size:.9rem">✗ Pinout verification FAILED — ${d.passed}/${d.total} checks passed</span>`;
+    }
+    checksEl.innerHTML = d.checks.map(c=>`<div>${c.pass?'✓':'✗'} <b>Check ${c.n}:</b> ${c.name} <span style="color:var(--muted)">— ${c.detail}</span></div>`).join('');
+    triageEl.innerHTML = d.triage.length ? d.triage.map(t=>{
+      const diy = t.verdict === 'DIY simple fix';
+      const head = t.type === 'power' ? '⚡ Power budget' : `⚠ ${t.gpio_key} (physical pin ${t.phys_pin}) — ${t.between.join(' + ')}`;
+      return `<div style="border:1px solid var(--border);border-left:3px solid ${diy?'var(--green)':'#ff2d78'};border-radius:5px;padding:7px 10px;margin-bottom:5px">
+        <div style="font-size:.82rem"><b>${head}</b> · <span class="tag ${diy?'tag-green':''}" style="${diy?'':'background:#5b2333;color:#ff8fab'}">${t.verdict}</span></div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:2px">${t.fix}</div>
+      </div>`;
+    }).join('') : '<div class="hint">No conflicts to triage — nothing is double-claimed and the power budget is within limits.</div>';
+  } catch(e) { if (!silent) statusErr('Verification error: ' + e.message); }
+}
+
+// ── Print overlap gate (R5) ──
+function overlapGateCleared(){
+  const ovs = (currentGeom && currentGeom.overlaps) || [];
+  if (!ovs.length) return true;
+  const ack = document.getElementById('overlap-ack');
+  return !!(ack && ack.checked);
+}
+function refreshOverlapGate(){
+  const card = document.getElementById('overlap-gate-card');
+  if (!card) return;
+  const ovs = (currentGeom && currentGeom.overlaps) || [];
+  card.style.display = ovs.length ? '' : 'none';
+  if (ovs.length) {
+    document.getElementById('overlap-gate-list').innerHTML = ovs.map(o=>
+      `<div>✕ <b>${o.a}</b> overlaps <b>${o.b}</b> at (${o.cx}, ${o.cy}) mm — marked <span style="color:#ff2d78;font-weight:700">■</span> in the Placement view</div>`).join('');
+  }
+  const blocked = !overlapGateCleared();
+  const pb = document.getElementById('pkg-btn');
+  const sb = document.getElementById('send-btn');
+  if (pb) pb.disabled = blocked && ovs.length > 0;
+  if (sb) sb.disabled = blocked && ovs.length > 0;
+  updateCameraStatus();
+}
 </script>
 </body>
 </html>
