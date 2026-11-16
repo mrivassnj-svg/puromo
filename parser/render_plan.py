@@ -130,25 +130,42 @@ def has_hat(spec: dict, selection: dict = None) -> bool:
     return bool(spec.get("display_diagonal_inch"))
 
 
-def canonical_selection(spec: dict, selection: dict = None) -> dict:
-    """Normalise the design selection (framework design state) into a
-    fixed-shape dict for hashing. Fields the caller didn't supply are
-    filled from the spec itself — syncSpecFromDesign() folds the
-    selection into the spec (selected_modules, camera_zone, battery),
-    so both the report-images endpoint and the report endpoint derive
-    the same canonical selection for the same design."""
+def canonical_selection(spec: dict, selection: dict = None,
+                        modules: list = None,
+                        power_sources: list = None) -> dict:
+    """Normalise the design CHOICES into a fixed-shape dict.
+
+    Consolidation rule: choices are read ONLY from the selection —
+    never from copies folded into the spec by older flows (a loaded
+    save once mixed a stale spec fold with live defaults and split
+    one design into two identities). Fields that are consequences
+    of the choices (pinout modules, battery presence/size) are
+    derived here from the registries, the same way
+    resolve_design() folds them into the effective spec."""
     sel = selection or {}
+    module_ids = sorted(str(m) for m in (sel.get("module_ids") or []))
+    mods = {m.get("id"): m for m in (modules or [])}
+    pinout = sorted({mods[m]["pinout_module"] for m in module_ids
+                     if m in mods and mods[m].get("pinout_module")})
+    power_id = sel.get("power_source_id")
+    powers = {p.get("id"): p for p in (power_sources or [])}
+    ps = powers.get(power_id) if power_id else None
+    has_batt = bool(ps and ps.get("bay") and ps.get("dims_mm"))
     return {
-        "brain_id": sel.get("brain_id") or spec.get("brain_id"),
-        "module_ids": sorted(str(m) for m in (sel.get("module_ids") or [])),
-        "power_source_id": sel.get("power_source_id"),
-        "camera_zone": sel.get("camera_zone") or spec.get("camera_zone"),
+        "brain_id": sel.get("brain_id"),
+        "module_ids": module_ids,
+        "power_source_id": power_id,
+        "camera_zone": (sel.get("camera_zone")
+                        if "camera_module_3" in module_ids else None),
         "has_hat": has_hat(spec, sel),
-        "pinout_modules": sorted(str(m)
-                                 for m in (spec.get("selected_modules")
-                                           or [])),
-        "include_battery": bool(spec.get("include_battery")),
-        "battery_size_mm": spec.get("battery_size_mm"),
+        "pinout_modules": pinout,
+        "include_battery": has_batt,
+        "battery_size_mm": (list(ps["dims_mm"]) if has_batt else None),
+        # Deliberately no "header_variant" label here: the choice's
+        # entire physical content is the gpio_header_* numbers it
+        # sets in the resolved spec, and those ARE in the identity.
+        # (Legacy plans carry no variant label in their selection;
+        # keying identity on the label split one design in two.)
     }
 
 
@@ -209,38 +226,91 @@ def _norm_value(value):
     return value
 
 
-def canonical_design(spec: dict, selection: dict = None) -> dict:
-    """The design itself, as a fixed-shape dict: the physical spec
-    fields (DESIGN_SPEC_FIELDS only — provenance and derived numbers
-    never enter) plus the canonical selection. Two spec dicts that
-    describe the same physical design produce the same canonical
-    design, however the spec was obtained."""
-    spec = spec or {}
+# Spec keys that are COPIES of choices, folded in by older flows.
+# resolve_design strips them and re-derives them from the selection,
+# so a folded spec and a raw spec with the same choices resolve to
+# the same design.
+CHOICE_SPEC_KEYS = ("selected_modules", "camera_zone",
+                    "include_battery", "battery_size_mm", "brain_id")
+
+
+def resolve_design(spec: dict, selection: dict = None,
+                   modules: list = None, power_sources: list = None,
+                   header_variants: dict = None) -> dict:
+    """THE single derivation of a design (consolidation).
+
+    Input: a device spec (raw from the crawl, or carrying stale
+    folded choice copies — they are stripped) plus the choices.
+    Output: the effective spec (folds applied HERE, the only place),
+    the canonical selection, the canonical design, and the design
+    ID. Every endpoint that needs any of these calls this function;
+    identity exists in exactly one place."""
+    eff = dict(spec or {})
+    sel = selection or {}
+    for key in CHOICE_SPEC_KEYS:
+        eff.pop(key, None)
+    if sel.get("brain_id"):
+        eff["brain_id"] = sel["brain_id"]
+    canonical_sel = canonical_selection(eff, sel, modules,
+                                        power_sources)
+    if canonical_sel["pinout_modules"]:
+        eff["selected_modules"] = list(canonical_sel["pinout_modules"])
+    if canonical_sel["camera_zone"]:
+        eff["camera_zone"] = canonical_sel["camera_zone"]
+    if canonical_sel["include_battery"]:
+        eff["include_battery"] = True
+        eff["battery_size_mm"] = list(canonical_sel["battery_size_mm"])
+    hv = sel.get("header_variant")
+    if hv and header_variants and hv in header_variants:
+        v = header_variants[hv]
+        eff["gpio_header_variant"] = hv
+        eff["gpio_header_above_mm"] = v["above_mm"]
+        eff["gpio_header_below_mm"] = v["below_mm"]
+        eff["gpio_header_mated_gap_mm"] = v["mated_gap_mm"]
     design_spec = {}
     for field in DESIGN_SPEC_FIELDS:
-        if field in spec:
-            value = _norm_value(spec[field])
+        if field in eff:
+            value = _norm_value(eff[field])
             if field in _ORDER_FREE_FIELDS and isinstance(value, list):
                 value = sorted(
                     value,
                     key=lambda v: json.dumps(v, sort_keys=True,
                                              default=str))
             design_spec[field] = value
-    return {"spec": design_spec,
-            "selection": canonical_selection(spec, selection)}
+    design = {"spec": design_spec, "selection": canonical_sel}
+    blob = json.dumps(design, sort_keys=True, separators=(",", ":"),
+                      default=str)
+    return {
+        "spec": eff,
+        "selection": canonical_sel,
+        "design": design,
+        "design_hash": hashlib.sha256(
+            blob.encode("utf-8")).hexdigest()[:16],
+    }
 
 
-def design_hash(spec: dict, selection: dict = None) -> str:
+def canonical_design(spec: dict, selection: dict = None,
+                     modules: list = None, power_sources: list = None,
+                     header_variants: dict = None) -> dict:
+    """The design itself, as a fixed-shape dict — the resolved
+    design (see resolve_design). Two spec dicts that describe the
+    same physical design with the same choices produce the same
+    canonical design, however the spec was obtained."""
+    return resolve_design(spec, selection, modules, power_sources,
+                          header_variants)["design"]
+
+
+def design_hash(spec: dict, selection: dict = None,
+                modules: list = None, power_sources: list = None,
+                header_variants: dict = None) -> str:
     """Stable identity of a design: sha256 of the canonical design
     JSON, truncated to 16 hex chars. Identical DESIGN → identical
-    hash, even if the spec's provenance, derived numbers or field
-    order differ; any physical design change → a different hash, so
-    images rendered for one design can never be looked up for
-    another."""
-    blob = json.dumps(canonical_design(spec, selection),
-                      sort_keys=True, separators=(",", ":"),
-                      default=str)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    hash, even if the spec's provenance, derived numbers, folds or
+    field order differ; any physical design change → a different
+    hash, so images rendered for one design can never be looked up
+    for another."""
+    return resolve_design(spec, selection, modules, power_sources,
+                          header_variants)["design_hash"]
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +420,9 @@ def _step_camera(new_groups: set) -> dict:
 
 def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
                       selection: dict = None, brains: list = None,
-                      output_root: str = "output") -> dict:
+                      output_root: str = "output",
+                      modules: list = None, power_sources: list = None,
+                      header_variants: dict = None) -> dict:
     """Build the full render plan for a design.
 
     spec            — the design's device spec dict (for a HAT design
@@ -364,12 +436,15 @@ def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
     output_root     — server output dir; image dir is derived from it.
     """
     geom = geom or {}
-    sel = canonical_selection(spec, selection)
+    resolved = resolve_design(spec, selection, modules, power_sources,
+                              header_variants)
+    spec = resolved["spec"]
+    sel = resolved["selection"]
     hat = sel["has_hat"]
     camera = _camera_info(spec, geom, sel)
     battery = _battery_info(spec, geom, sel)
     host = resolve_host_board(spec, selection, brains)
-    h = design_hash(spec, selection)
+    h = resolved["design_hash"]
 
     # Groups that may NEVER appear for this design (absent hardware).
     banned = set()
@@ -426,7 +501,8 @@ def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
     return {
         "version": 1,
         "design_hash": h,
-        "design": canonical_design(spec, selection),
+        "design": resolved["design"],
+        "choices": selection,
         "model": spec.get("model"),
         "spec": spec,
         "geom": geom,
