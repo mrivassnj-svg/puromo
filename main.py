@@ -652,7 +652,8 @@ def _registries() -> dict:
 
 class CapabilityRequest(BaseModel):
     brain_id: str
-    module_ids: List[str] = []
+    module_ids: List[str] = []     # modules to evaluate
+    selected_ids: List[str] = []   # modules already in the design (context)
 
 
 class VerifyRequest(BaseModel):
@@ -758,17 +759,18 @@ def post_capability(req: CapabilityRequest):
             results.append({"module_id": mid, "capable": False,
                             "reasons": [f"Unknown module id: {mid}"]})
             continue
-        reasons = _module_reasons(brain, module, req.module_ids, modules_by_id)
+        reasons = _module_reasons(brain, module, req.selected_ids,
+                                  modules_by_id)
         results.append({"module_id": mid, "capable": not reasons,
                         "reasons": reasons})
         if reasons:
-            alt = _alternative_brain(brain, module, req.module_ids,
+            alt = _alternative_brain(brain, module, req.selected_ids,
                                      regs["brains"], modules_by_id)
             if alt:
                 alternatives[mid] = alt
     sel_ma = sum(int((modules_by_id[m].get("requires") or {}).get("pins_ma")
                      or 0)
-                 for m in req.module_ids if m in modules_by_id)
+                 for m in req.selected_ids if m in modules_by_id)
     return {
         "status": "ok",
         "brain": {"id": brain["id"], "name": brain["name"]},
