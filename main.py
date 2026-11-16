@@ -130,6 +130,7 @@ class ReportImagesRequest(BaseModel):
     geom:      dict
     specs:     dict
     selection: Optional[dict] = None
+    force:     bool = False
 
 class PrintPackageRequest(BaseModel):
     model_name:   str
@@ -602,7 +603,9 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
     Build the render plan for this design and, if Blender is
     available, queue the imaging script (same pattern as
     /api/generate-3d). If Blender is NOT available, say so —
-    status 'unavailable' — and never fake images.
+    status 'unavailable' — and never fake images. With
+    force=true (what the Report tab's button sends) an already-
+    rendered design is rendered again instead of answered 'ready'.
     """
     steps = (req.specs or {}).get("assembly_steps", [])
     plan = build_render_plan(
@@ -628,7 +631,7 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
                 "reason": "No assembly steps in the specs — run the "
                           "pipeline (assemble-specs) first.",
                 **base}
-    if present == total:
+    if present == total and not req.force:
         eng = _manifest_engine(img_dir)
         return {"status": "ready",
                 "message": "Assembly images already rendered for "
@@ -655,6 +658,13 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
         # fresh Blender process (a native crash in one engine cannot
         # be caught, only outlived). Partial output is kept — the
         # status logic reports the best attempt's count honestly.
+        if req.force:
+            # Re-render of the same design (e.g. a better rig): drop
+            # the old PNGs first so per-attempt counts measure THIS
+            # run, never the previous rig's leftovers.
+            for f in plan["frames"]:
+                (img_dir / f["filename"]).unlink(missing_ok=True)
+            (img_dir / "manifest.json").unlink(missing_ok=True)
         log_path = OUTPUT_DIR / f"report_images_{h}.log"
         chunks = []
         best, best_engine = 0, None

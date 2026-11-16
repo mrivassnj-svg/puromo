@@ -3833,7 +3833,8 @@ async function generateReportImages(){
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ spec: currentSpec, geom: currentGeom,
                              specs: currentSpecs,
-                             selection: currentSelection() }),
+                             selection: currentSelection(),
+                             force: true }),
     });
     const d = await r.json();
     if (d.design_hash) reportImagesHash = d.design_hash;
