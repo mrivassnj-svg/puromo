@@ -31,6 +31,14 @@ script with WORKBENCH, then CYCLES, and caching the winner.
 Outputs: <plan.output_dir>/step_NN.png per frame + manifest.json.
 Without bpy the module still imports (BLENDER_AVAILABLE=False) so its
 pure layout helpers stay testable; main() then refuses to run.
+
+Presentation (Requirement 6c): a bright studio rig — neutral light
+backdrop, a ground plane with a soft contact shadow, three-point
+lighting with real fill — and a PER-FRAME camera: each plan frame's
+camera intent (top/kit, below, home, above, front, hero) is turned
+into a position auto-framed on the objects visible in that frame, so
+the photo set reads as one story: loose parts → stack → closed,
+working device (screen lit in the final frame).
 """
 
 import sys
@@ -150,6 +158,54 @@ def frame_lid_offset_mm(plan: dict, frame: dict) -> float:
 
 def frame_visible_groups(frame: dict) -> set:
     return set(frame.get("visible_groups") or [])
+
+
+# ---------------------------------------------------------------------------
+# Per-frame camera (pure — unit-testable anywhere)
+# ---------------------------------------------------------------------------
+# Azimuth is measured around Z from the scene's front edge (-Y, the
+# side the original fixed camera looked from), positive toward +X;
+# elevation is above the target's horizon. The device front — the
+# edge the viewer reads first — is -Y; the USB cable exits at +Y.
+CAMERA_VIEWS = {
+    "home":  {"azimuth_deg": -38.0, "elevation_deg": 32.0,
+              "distance_scale": 1.0},
+    "above": {"azimuth_deg": -38.0, "elevation_deg": 58.0,
+              "distance_scale": 1.0},
+    "below": {"azimuth_deg": -30.0, "elevation_deg": -32.0,
+              "distance_scale": 1.0},
+    "front": {"azimuth_deg": 0.0,   "elevation_deg": 10.0,
+              "distance_scale": 1.0},
+    "top":   {"azimuth_deg": -38.0, "elevation_deg": 85.0,
+              "distance_scale": 1.0},
+    "hero":  {"azimuth_deg": -32.0, "elevation_deg": 22.0,
+              "distance_scale": 0.92},
+}
+CAMERA_FOV_DEG = 42.0
+
+
+def frame_camera(bbox, view, fov_deg=CAMERA_FOV_DEG):
+    """Camera (location, target) framing a bounding box from a named
+    view. bbox = ((x0,y0,z0),(x1,y1,z1)) in scene units. The camera
+    sits on a sphere around the bbox centre at a distance that fits
+    the bbox's bounding sphere in the (vertical) field of view, with
+    a 1.25 margin, clamped to a sane range."""
+    (x0, y0, z0), (x1, y1, z1) = bbox
+    centre = ((x0 + x1) / 2.0, (y0 + y1) / 2.0, (z0 + z1) / 2.0)
+    radius = 0.5 * math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2
+                             + (z1 - z0) ** 2)
+    radius = max(radius, 1e-4)
+    spec = CAMERA_VIEWS.get(view) or CAMERA_VIEWS["home"]
+    az = math.radians(spec["azimuth_deg"])
+    el = math.radians(spec["elevation_deg"])
+    fit = radius / math.tan(math.radians(fov_deg) / 2.0)
+    dist = fit * 1.25 * spec["distance_scale"]
+    dist = min(max(dist, radius * 1.7), radius * 9.0)
+    direction = (math.cos(el) * math.sin(az),
+                 -math.cos(el) * math.cos(az),
+                 math.sin(el))
+    location = tuple(c + dist * d for c, d in zip(centre, direction))
+    return location, centre
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +385,7 @@ def build_scene(plan: dict) -> dict:
         lid_base_z[id(jcap)] = 0.0
 
     # ── Display glass in the lid cutout ──
+    screen_ui = None
     dc = geom.get("display_cutout") or {}
     if dc.get("w", 0) > 0:
         m_glass = _mat_col("Disp_Glass", 0.05, 0.10, 0.20,
@@ -340,6 +397,21 @@ def build_scene(plan: dict) -> dict:
         groups["display_lid"].append(glass)
         lid_riders.append(glass)
         lid_base_z[id(glass)] = 0.0
+        # Dim UI inset on the glass (R6c): visible only in the
+        # screen_on finale, where the glass itself is swapped for an
+        # emissive "lit screen" material. Not a group member — the
+        # frame loop owns its visibility.
+        m_ui = _mat_col("Disp_UI", 0.10, 0.16, 0.22,
+                        roughness=0.4, emission_strength=0.35)
+        screen_ui = _add_box(
+            "Display_UI", mm(dc["x"] + dc["w"] * 0.18),
+            mm(dc["y"] + dc["h"] * 0.24), mm(lid_bottom + 1.32),
+            mm(dc["w"] * 0.64), mm(dc["h"] * 0.46), mm(0.15),
+            m_ui, cols["display_lid"])
+        screen_ui.hide_render = True
+        screen_ui.hide_viewport = True
+        lid_riders.append(screen_ui)
+        lid_base_z[id(screen_ui)] = 0.0
 
     # ── Camera — "the eyes": board on the lid at the aperture,
     #    lens through it, CSI ribbon routed toward board centre ──
@@ -400,8 +472,29 @@ def build_scene(plan: dict) -> dict:
     cable_obj.data.materials.append(m_cable)
     groups["cables"].append(cable_obj)
 
+    # ── Studio ground (R6c): the workbench every frame stands on.
+    # Not a group member — the frame loop only hides it for the
+    # from-below inserts shot. A shadow catcher where the engine
+    # supports it (soft contact shadow on the bright backdrop),
+    # otherwise a plain matte light-grey plane.
+    env_col = add_collection("ENV")
+    m_ground = _mat_col("Studio_Ground", 0.78, 0.78, 0.79,
+                        roughness=0.95)
+    ground = _add_box("Studio_Ground", mm(-W * 0.9), mm(-H * 2.2),
+                      -mm(2.0), mm(W * 2.8), mm(H * 5.4), mm(2.0),
+                      m_ground, env_col)
+    try:
+        ground.is_shadow_catcher = True
+    except Exception:
+        pass
+    try:
+        ground.cycles.is_shadow_catcher = True
+    except Exception:
+        pass
+
     return {"groups": groups, "lid_riders": lid_riders,
-            "lid_base_z": lid_base_z, "layout": layout}
+            "lid_base_z": lid_base_z, "layout": layout,
+            "ground": ground, "screen_ui": screen_ui}
 
 
 def _material_base_color(obj):
@@ -450,41 +543,84 @@ def apply_object_colors(state: dict):
 
 
 def setup_render_rig(plan: dict, engine: str = "EEVEE"):
-    """Fixed camera + lighting rig and per-engine render settings."""
+    """Studio lighting rig + per-engine render settings (R6c).
+
+    Bright neutral backdrop, three-point lighting with real fill,
+    noise control tuned per engine. The camera itself is positioned
+    per frame (point_camera + frame_camera); here it only gets its
+    lens: a fixed vertical FOV matching frame_camera's fit maths."""
     scene = bpy.context.scene
     if engine == "WORKBENCH":
-        # No GPU shader pipeline, no world nodes: shades by object
-        # colour under a studio HDRI-less rig. This is the fallback
-        # that survives machines where EEVEE's OpenGL context dies.
+        # No GPU shader pipeline: shades by object colour under a
+        # studio rig. This is the fallback that survives machines
+        # where EEVEE's OpenGL context dies.
         scene.render.engine = "BLENDER_WORKBENCH"
         shading = scene.display.shading
         shading.light = "STUDIO"
         shading.color_type = "OBJECT"
         shading.show_shadows = True
         shading.show_cavity = True
+        try:
+            # Use the same bright world colour as the other engines
+            # instead of the default dark viewport backdrop.
+            shading.background_type = "WORLD"
+        except Exception:
+            pass
     elif engine == "CYCLES":
         scene.render.engine = "CYCLES"
         scene.cycles.device = "CPU"
-        scene.cycles.samples = 32
-        scene.cycles.use_denoising = False
+        # Noise control (R6c): the Pi's winning engine must produce
+        # print-clean images — more samples + adaptive sampling, and
+        # denoising whenever the build offers it. A denoiser config
+        # problem must never kill the render: fall back to none.
+        scene.cycles.samples = 128
+        try:
+            scene.cycles.use_adaptive_sampling = True
+            scene.cycles.adaptive_threshold = 0.02
+        except Exception:
+            pass
+        try:
+            scene.cycles.denoiser = "OPENIMAGEDENOISE"
+            scene.cycles.use_denoising = True
+        except Exception:
+            scene.cycles.use_denoising = False
     else:
         try:
             scene.render.engine = "BLENDER_EEVEE_NEXT"
         except Exception:
             scene.render.engine = "BLENDER_EEVEE"
+        try:
+            scene.eevee.taa_render_samples = 64
+        except Exception:
+            pass
     scene.render.resolution_x = 960
     scene.render.resolution_y = 720
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
 
-    if engine != "WORKBENCH":
-        world = bpy.data.worlds.new("ReportWorld")
-        scene.world = world
-        world.use_nodes = True
-        bg = world.node_tree.nodes.get("Background")
-        if bg:
-            bg.inputs[0].default_value = (0.015, 0.017, 0.025, 1.0)
-            bg.inputs[1].default_value = 1.0
+    # Bright neutral studio backdrop for every engine (R6c) — no
+    # near-black anywhere; the dark shell parts must read against it.
+    world = bpy.data.worlds.new("ReportWorld")
+    scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get("Background")
+    if bg:
+        bg.inputs[0].default_value = (0.62, 0.64, 0.66, 1.0)
+        bg.inputs[1].default_value = 1.0
+
+    # Colour management: AgX + a slight exposure lift so mid-tone
+    # parts separate from the backdrop (guarded — property names
+    # vary across Blender versions).
+    if engine == "EEVEE":
+        try:
+            scene.view_settings.view_transform = "AgX"
+        except Exception:
+            pass
+    if engine in ("EEVEE", "CYCLES"):
+        try:
+            scene.view_settings.exposure = 0.25
+        except Exception:
+            pass
 
     def sun(name, energy, rx, rz):
         data = bpy.data.lights.new(name, "SUN")
@@ -495,24 +631,65 @@ def setup_render_rig(plan: dict, engine: str = "EEVEE"):
         return obj
 
     sun("KeyLight", 4.0, 55, 35)
-    sun("FillLight", 1.2, 70, -120)
-    sun("RimLight", 2.0, 120, 180)
+    sun("FillLight", 2.2, 70, -120)
+    sun("RimLight", 2.6, 120, 180)
 
     cam_data = bpy.data.cameras.new("ReportCamera")
     cam_data.clip_end = 10.0
+    try:
+        cam_data.sensor_fit = "VERTICAL"
+        cam_data.angle = math.radians(CAMERA_FOV_DEG)
+    except Exception:
+        pass
     cam_obj = bpy.data.objects.new("ReportCamera", cam_data)
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
     return cam_obj
 
 
-def point_camera(cam_obj, frame: dict):
-    cam = frame.get("camera") or {}
-    loc = cam.get("location_mm") or [80, -70, 50]
-    look = cam.get("look_at_mm") or [35, 17, 10]
-    cam_obj.location = (mm(loc[0]), mm(loc[1]), mm(loc[2]))
-    direction = Vector((mm(look[0]), mm(look[1]), mm(look[2]))) \
-        - cam_obj.location
+def visible_bbox(state: dict):
+    """World-space bounding box ((min),(max)) of the objects a frame
+    will actually show — group members not hidden for render. The
+    ground, lights and camera are not group members and never count
+    toward framing. Returns None when nothing is visible."""
+    lo = [math.inf, math.inf, math.inf]
+    hi = [-math.inf, -math.inf, -math.inf]
+    found = False
+    for objs in state["groups"].values():
+        for o in objs:
+            if getattr(o, "hide_render", False):
+                continue
+            try:
+                corners = o.bound_box
+                mw = o.matrix_world
+            except Exception:
+                continue
+            for corner in corners:
+                try:
+                    v = mw @ Vector(corner)
+                    vals = (v[0], v[1], v[2])
+                except Exception:
+                    continue
+                for i in range(3):
+                    lo[i] = min(lo[i], vals[i])
+                    hi[i] = max(hi[i], vals[i])
+                found = True
+    return (tuple(lo), tuple(hi)) if found else None
+
+
+def _fallback_bbox(plan: dict):
+    geom = plan.get("geom") or {}
+    W = float(geom.get("shell_width_mm") or 70)
+    H = float(geom.get("shell_height_mm") or 35)
+    D = float(geom.get("shell_depth_mm") or 32)
+    return ((0.0, 0.0, 0.0), (mm(W), mm(H), mm(D)))
+
+
+def point_camera(cam_obj, location, target):
+    """Place the camera at `location` (scene units) looking at
+    `target` — the per-frame position comes from frame_camera()."""
+    cam_obj.location = (location[0], location[1], location[2])
+    direction = Vector(target) - Vector(cam_obj.location)
     cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y") \
         .to_euler()
 
@@ -527,6 +704,139 @@ def apply_frame(state: dict, plan: dict, frame: dict):
     off = mm(frame_lid_offset_mm(plan, frame))
     for o in state["lid_riders"]:
         o.location.z = state["lid_base_z"].get(id(o), 0.0) + off
+
+
+# ---------------------------------------------------------------------------
+# Kit layout (step 1) + screen-on finale — presentation-only frame
+# state. Both record exactly what they touch and restore it after
+# the frame renders; the assembly itself is never modified.
+# ---------------------------------------------------------------------------
+
+def _obj_world_bbox(o):
+    """(centre, min_z) of one object's world bounding box, or None."""
+    try:
+        corners = o.bound_box
+        mw = o.matrix_world
+    except Exception:
+        return None
+    pts = []
+    for corner in corners:
+        try:
+            v = mw @ Vector(corner)
+            pts.append((v[0], v[1], v[2]))
+        except Exception:
+            return None
+    if not pts:
+        return None
+    centre = tuple(sum(p[i] for p in pts) / len(pts) for i in range(3))
+    return centre, min(p[2] for p in pts)
+
+
+def apply_kit_layout(state: dict, plan: dict):
+    """Spread the printed parts as a laid-out kit for the step-1
+    photograph: bottom case at the origin area, lid slid +X clear of
+    it, button caps (printed parts too, though their assembly step
+    comes later) unhidden in a row on the ground in front (-Y).
+    Returns the saved state for restore_layout()."""
+    geom = plan.get("geom") or {}
+    W = float(geom.get("shell_width_mm") or 70)
+    saved = []
+
+    def record(o):
+        saved.append((o, o.location.x, o.location.y, o.location.z,
+                      o.hide_render, o.hide_viewport))
+
+    riders = state.get("lid_riders") or []
+    if riders:
+        lid = riders[0]
+        record(lid)
+        lid.location.x += mm(W + 18.0)
+    caps = list(state["groups"].get("button_caps") or [])
+
+    def cap_x(o):
+        bb = _obj_world_bbox(o)
+        return bb[0][0] if bb else 0.0
+
+    caps.sort(key=cap_x)
+    for i, cap in enumerate(caps):
+        bb = _obj_world_bbox(cap)
+        if bb is None:
+            continue
+        (cx, cy, _cz), min_z = bb
+        record(cap)
+        cap.location.x += mm(8.0 + i * 13.0) - cx
+        cap.location.y += mm(-15.0) - cy
+        cap.location.z += -min_z
+        cap.hide_render = False
+        cap.hide_viewport = False
+    return saved
+
+
+def restore_layout(saved):
+    for o, x, y, z, hr, hv in saved:
+        o.location.x, o.location.y, o.location.z = x, y, z
+        o.hide_render = hr
+        o.hide_viewport = hv
+
+
+def apply_screen_on(state: dict):
+    """Light the display for the finale frame: swap the glass for an
+    emissive material (and a bright object colour for WORKBENCH),
+    and reveal the dim UI inset. Returns saved state, or None when
+    the design has no display glass."""
+    glass = None
+    for o in state["groups"].get("display_lid") or []:
+        if o.name.startswith("Display_Glass"):
+            glass = o
+            break
+    if glass is None:
+        return None
+    try:
+        color = tuple(glass.color)
+    except Exception:
+        color = None
+    saved = {"glass": glass,
+             "materials": list(glass.data.materials),
+             "color": color}
+    lit = _mat_col("Disp_ScreenOn", 0.72, 0.92, 1.0,
+                   roughness=0.25, emission_strength=2.2)
+    try:
+        glass.data.materials.clear()
+        glass.data.materials.append(lit)
+    except Exception:
+        if glass.data.materials:
+            glass.data.materials[0] = lit
+        else:
+            glass.data.materials.append(lit)
+    try:
+        glass.color = (0.80, 0.95, 1.0, 1.0)
+    except Exception:
+        pass
+    ui = state.get("screen_ui")
+    if ui is not None:
+        ui.hide_render = False
+        ui.hide_viewport = False
+    return saved
+
+
+def restore_screen_on(state: dict, saved: dict):
+    glass = saved["glass"]
+    try:
+        glass.data.materials.clear()
+        for m in saved["materials"]:
+            glass.data.materials.append(m)
+    except Exception:
+        if saved["materials"]:
+            glass.data.materials[0] = saved["materials"][0]
+    if saved.get("color") is not None:
+        try:
+            glass.color = saved["color"]
+        except Exception:
+            pass
+    ui = state.get("screen_ui")
+    if ui is not None:
+        ui.hide_render = True
+        ui.hide_viewport = True
 
 
 # ---------------------------------------------------------------------------
@@ -552,16 +862,42 @@ def render_plan_file(plan_path: str, engine: str = None) -> dict:
     state = build_scene(plan)
     if engine == "WORKBENCH":
         apply_object_colors(state)
+    if state.get("ground") is not None:
+        try:
+            state["ground"].color = (0.78, 0.78, 0.79, 1.0)
+        except Exception:
+            pass
     cam_obj = setup_render_rig(plan, engine)
     scene = bpy.context.scene
 
     results = []
     for frame in plan["frames"]:
         apply_frame(state, plan, frame)
-        point_camera(cam_obj, frame)
+        intent = frame.get("camera") or {}
+        view = intent.get("view") or "home"
+        # Kit layout first (it changes what is visible and where),
+        # then frame the camera on the result.
+        kit_saved = None
+        if intent.get("layout") == "kit":
+            kit_saved = apply_kit_layout(state, plan)
+        ground = state.get("ground")
+        if ground is not None:
+            # The from-below inserts shot looks up at the bosses —
+            # the workbench itself would block it.
+            ground.hide_render = (view == "below")
+        bbox = visible_bbox(state) or _fallback_bbox(plan)
+        location, target = frame_camera(bbox, view)
+        point_camera(cam_obj, location, target)
+        screen_saved = None
+        if intent.get("screen_on"):
+            screen_saved = apply_screen_on(state)
         path = os.path.join(out_dir, frame["filename"])
         scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
+        if screen_saved is not None:
+            restore_screen_on(state, screen_saved)
+        if kit_saved is not None:
+            restore_layout(kit_saved)
         ok = os.path.exists(path) and os.path.getsize(path) > 0
         print(f"[ReportImages] step {frame['step_index']}: "
               f"{frame['filename']} {'OK' if ok else 'FAILED'}")
