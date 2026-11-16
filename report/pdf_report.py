@@ -801,7 +801,7 @@ class PDFReportGenerator:
             story.append(Paragraph(
                 "<i>Assembly images not generated for this design yet "
                 "— generate them from the Report tab "
-                "(requires Blender).</i>",
+                f"(requires Blender). Design: {self.design_hash}</i>",
                 st["body"]))
             story.append(Spacer(1,2*mm))
         elif steps and have < len(steps):

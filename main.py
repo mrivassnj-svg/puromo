@@ -43,7 +43,10 @@ from crawler.device_crawler import (
     GPIO_HEADER_VARIANTS, COMMON_COMPONENT_HEIGHTS,
 )
 from parser.dimension_math import DimensionMath, waveshare_hat_math_summary
-from parser.render_plan import build_render_plan, design_hash as render_design_hash
+from parser.render_plan import (
+    build_render_plan, canonical_design,
+    design_hash as render_design_hash,
+)
 from modular.modular_entities import HandheldBuild
 from specs.assembly_specs import AssemblySpecGenerator
 from specs.pinout_engine import (
@@ -519,8 +522,18 @@ def generate_report(req: ReportRequest):
         slug = req.device_name.lower().replace(" ", "_")
         pdf_path = str(OUTPUT_DIR / f"{slug}_design_report.pdf")
         # Requirement 6b: §7 embeds assembly images ONLY from this
-        # design's hash-keyed directory.
+        # design's hash-keyed directory — or, as a rescue, from a
+        # directory rendered for the same canonical DESIGN under a
+        # different hash (sets rendered before the canonical-design
+        # hash existed, whose spec provenance has since drifted).
         design_hash = render_design_hash(req.spec, req.selection)
+        images_hash = design_hash
+        images_dir = OUTPUT_DIR / "report_images" / design_hash
+        if not any(images_dir.glob("step_*.png")):
+            rescued = _fallback_images_dir(req.spec, req.selection,
+                                           design_hash)
+            if rescued is not None:
+                images_hash, images_dir = rescued
         gen = PDFReportGenerator(
             device_name    = req.device_name,
             spec           = req.spec,
@@ -529,8 +542,8 @@ def generate_report(req: ReportRequest):
             firmware_arch  = req.firmware_arch,
             assembly_specs = req.assembly_specs,
             output_path    = pdf_path,
-            design_hash    = design_hash,
-            images_dir     = str(OUTPUT_DIR / "report_images" / design_hash),
+            design_hash    = images_hash,
+            images_dir     = str(images_dir),
         )
         gen.generate()
         return {
@@ -538,6 +551,7 @@ def generate_report(req: ReportRequest):
             "pdf_file":  Path(pdf_path).name,
             "pdf_path":  pdf_path,
             "design_hash": design_hash,
+            "images_design_hash": images_hash,
         }
     except Exception as e:
         logger.exception("PDF generation failed")
@@ -553,6 +567,40 @@ REPORT_IMAGE_JOBS: dict = {}
 
 def _report_image_dir(design_hash: str) -> Path:
     return OUTPUT_DIR / "report_images" / design_hash
+
+
+def _fallback_images_dir(spec, selection, own_hash: str):
+    """Rescue an image set rendered for the same DESIGN under a
+    different hash. Scans the saved render plans, compares canonical
+    designs (provenance-free), and returns (hash, dir) of the first
+    plan whose design matches AND whose image directory actually
+    holds PNGs. Returns None when nothing matches — the report then
+    honestly notes that no images were generated."""
+    try:
+        target = canonical_design(spec, selection)
+    except Exception:
+        return None
+    for plan_path in sorted(OUTPUT_DIR.glob("report_plan_*.json")):
+        try:
+            plan = json.loads(plan_path.read_text())
+        except Exception:
+            continue
+        other = plan.get("design_hash")
+        if not other or other == own_hash:
+            continue
+        try:
+            if canonical_design(plan.get("spec") or {},
+                                plan.get("selection")) != target:
+                continue
+        except Exception:
+            continue
+        other_dir = _report_image_dir(other)
+        if any(other_dir.glob("step_*.png")):
+            logger.info(
+                f"[Report] design {own_hash}: embedding images "
+                f"rendered under {other} (same canonical design)")
+            return other, other_dir
+    return None
 
 
 # Engine fallback chain (Pi errata, Blender 5.2.2): the imaging run
@@ -658,13 +706,23 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
         # fresh Blender process (a native crash in one engine cannot
         # be caught, only outlived). Partial output is kept — the
         # status logic reports the best attempt's count honestly.
+        backup_dir = None
         if req.force:
-            # Re-render of the same design (e.g. a better rig): drop
-            # the old PNGs first so per-attempt counts measure THIS
-            # run, never the previous rig's leftovers.
-            for f in plan["frames"]:
-                (img_dir / f["filename"]).unlink(missing_ok=True)
-            (img_dir / "manifest.json").unlink(missing_ok=True)
+            # Re-render of the same design (e.g. a better rig): move
+            # the old set aside so per-attempt counts measure THIS
+            # run — but never destroy it. If the new render fails,
+            # the previous set is restored below; a failed re-render
+            # must not leave the design with no images at all.
+            existing = [img_dir / f["filename"] for f in plan["frames"]
+                        if (img_dir / f["filename"]).exists()]
+            if (img_dir / "manifest.json").exists():
+                existing.append(img_dir / "manifest.json")
+            if existing:
+                backup_dir = img_dir / ".prev"
+                shutil.rmtree(backup_dir, ignore_errors=True)
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                for old in existing:
+                    old.replace(backup_dir / old.name)
         log_path = OUTPUT_DIR / f"report_images_{h}.log"
         chunks = []
         best, best_engine = 0, None
@@ -690,11 +748,36 @@ async def report_images(req: ReportImagesRequest, bg: BackgroundTasks):
             if got == total:
                 _write_engine_cache(engine)
                 break
+        restored = False
+        if backup_dir is not None:
+            if best == total:
+                # New set complete: the backed-up old set goes away.
+                shutil.rmtree(backup_dir, ignore_errors=True)
+            else:
+                # New render fell short: put the previous set back,
+                # replacing any partial output from this run.
+                for old in sorted(backup_dir.iterdir()):
+                    old.replace(img_dir / old.name)
+                shutil.rmtree(backup_dir, ignore_errors=True)
+                restored = True
+                chunks.append(
+                    f"===== re-render fell short ({best}/{total}); "
+                    f"previous image set restored =====")
         log_path.write_text("\n".join(chunks))
         if best == total:
             REPORT_IMAGE_JOBS[h] = {"status": "ready",
                                     "engine": best_engine,
                                     "images_present": best}
+        elif restored:
+            REPORT_IMAGE_JOBS[h] = {
+                "status": "ready",
+                "engine": _manifest_engine(img_dir),
+                "images_present": total,
+                "detail": f"Re-render produced only {best}/{total} "
+                          f"images — the previous image set was "
+                          f"restored unchanged. See "
+                          f"report_images_{h}.log",
+            }
         else:
             REPORT_IMAGE_JOBS[h] = {
                 "status": "error",
