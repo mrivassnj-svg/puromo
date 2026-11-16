@@ -705,10 +705,12 @@ def _alternative_brain(current: dict, module: dict, selected: list,
                        brains: list, modules_by_id: dict):
     """Most probable alternative board for an incapable module: a board where
     the module IS capable and the most already-selected modules stay capable;
-    ties broken by smallest board-area change."""
+    ties broken by smallest board-area change, then toward the toolchain's
+    default host board (the pinout engine's power_budget defaults to the
+    Pi 4), then registry order."""
     best, best_key = None, None
     cur_area = current["board_w_mm"] * current["board_h_mm"]
-    for b in brains:
+    for idx, b in enumerate(brains):
         if b["id"] == current["id"]:
             continue
         if _module_reasons(b, module, selected, modules_by_id):
@@ -719,7 +721,7 @@ def _alternative_brain(current: dict, module: dict, selected: list,
             and not _module_reasons(b, modules_by_id[mid], selected,
                                     modules_by_id))
         area_change = abs(b["board_w_mm"] * b["board_h_mm"] - cur_area)
-        key = (preserved, -area_change)
+        key = (preserved, -area_change, 1 if b["id"] == "pi_4_b" else 0, -idx)
         if best_key is None or key > best_key:
             best, best_key = b, key
     if best is None:
