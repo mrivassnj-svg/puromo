@@ -18,7 +18,15 @@ Run from Blender (invoked by POST /api/report-images, same pattern
 as /api/generate-3d):
 
     blender --background --python blender_gen/blender_report_images.py \\
-            -- --plan output/report_plan_<design_hash>.json
+            -- --plan output/report_plan_<design_hash>.json \\
+               [--engine EEVEE|WORKBENCH|CYCLES]
+
+The render engine is selectable via --engine or the environment
+variable PUROMO_RENDER_ENGINE (CLI wins; default EEVEE). The backend
+drives an engine fallback chain at process level (EEVEE can die
+natively — a GPU/OpenGL segfault in background mode on some machines
+— and a segfault cannot be caught in-process), retrying the whole
+script with WORKBENCH, then CYCLES, and caching the winner.
 
 Outputs: <plan.output_dir>/step_NN.png per frame + manifest.json.
 Without bpy the module still imports (BLENDER_AVAILABLE=False) so its
@@ -51,6 +59,42 @@ if BLENDER_AVAILABLE:
         mm, clear_scene, add_collection, _add_box, _add_cylinder,
         _mat_col, build_shell_bottom, build_shell_lid, build_pcb_assembly,
     )
+
+
+# ---------------------------------------------------------------------------
+# Render engine selection (pure — unit-testable anywhere)
+# ---------------------------------------------------------------------------
+
+ENGINES = ("EEVEE", "WORKBENCH", "CYCLES")
+
+
+def resolve_engine(requested=None) -> str:
+    """Engine choice: explicit argument > PUROMO_RENDER_ENGINE env >
+    EEVEE. Unknown names fall back to EEVEE with a warning — the
+    backend only ever passes valid names; this guards manual runs."""
+    cand = requested or os.environ.get("PUROMO_RENDER_ENGINE") or "EEVEE"
+    cand = str(cand).strip().upper()
+    if cand not in ENGINES:
+        print(f"[ReportImages] unknown engine {cand!r} — "
+              f"falling back to EEVEE")
+        return "EEVEE"
+    return cand
+
+
+# Per-group fallback colours for the WORKBENCH engine (which shades by
+# object colour, not materials). Mirrors the colours the scene
+# builders bake into materials where they define them.
+WORKBENCH_GROUP_COLORS = {
+    "printed_parts": (0.45, 0.47, 0.52, 1.0),   # shell grey
+    "inserts":       (0.72, 0.52, 0.20, 1.0),   # brass
+    "host_board":    (0.02, 0.30, 0.08, 1.0),   # PCB green
+    "hat_board":     (0.03, 0.22, 0.06, 1.0),   # PCB green (HAT)
+    "cables":        (0.05, 0.05, 0.06, 1.0),   # rubber black
+    "button_caps":   (0.95, 0.55, 0.15, 1.0),   # accent
+    "display_lid":   (0.05, 0.10, 0.20, 1.0),   # display glass
+    "camera":        (0.05, 0.10, 0.25, 1.0),   # camera PCB blue
+    "battery":       (0.15, 0.35, 0.75, 1.0),   # pack wrap blue
+}
 
 
 # ---------------------------------------------------------------------------
@@ -360,25 +404,87 @@ def build_scene(plan: dict) -> dict:
             "lid_base_z": lid_base_z, "layout": layout}
 
 
-def setup_render_rig(plan: dict):
-    """Fixed camera + lighting rig and EEVEE render settings."""
+def _material_base_color(obj):
+    """Best-effort Principled Base Color of the object's first
+    material that has one, else None. Used by the WORKBENCH path,
+    which shades by object colour instead of materials."""
+    data = getattr(obj, "data", None)
+    mats = getattr(data, "materials", None) or []
+    for mat in mats:
+        if mat is None:
+            continue
+        nodes = getattr(getattr(mat, "node_tree", None), "nodes", None)
+        if nodes is None:
+            continue
+        bsdf = None
+        get = getattr(nodes, "get", None)
+        if callable(get):
+            bsdf = get("Principled BSDF")
+        if bsdf is None:
+            try:
+                bsdf = nodes["Principled BSDF"]
+            except Exception:
+                bsdf = None
+        if bsdf is None:
+            continue
+        try:
+            val = bsdf.inputs["Base Color"].default_value
+            return (float(val[0]), float(val[1]), float(val[2]), 1.0)
+        except Exception:
+            continue
+    return None
+
+
+def apply_object_colors(state: dict):
+    """Set obj.color on every scene object (WORKBENCH 'OBJECT'
+    colour mode): the object's material Base Color when discoverable,
+    else the per-group default."""
+    for gname, objs in state["groups"].items():
+        default = WORKBENCH_GROUP_COLORS.get(
+            gname, (0.6, 0.6, 0.6, 1.0))
+        for o in objs:
+            try:
+                o.color = _material_base_color(o) or default
+            except Exception:
+                pass
+
+
+def setup_render_rig(plan: dict, engine: str = "EEVEE"):
+    """Fixed camera + lighting rig and per-engine render settings."""
     scene = bpy.context.scene
-    try:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    except Exception:
-        scene.render.engine = "BLENDER_EEVEE"
+    if engine == "WORKBENCH":
+        # No GPU shader pipeline, no world nodes: shades by object
+        # colour under a studio HDRI-less rig. This is the fallback
+        # that survives machines where EEVEE's OpenGL context dies.
+        scene.render.engine = "BLENDER_WORKBENCH"
+        shading = scene.display.shading
+        shading.light = "STUDIO"
+        shading.color_type = "OBJECT"
+        shading.show_shadows = True
+        shading.show_cavity = True
+    elif engine == "CYCLES":
+        scene.render.engine = "CYCLES"
+        scene.cycles.device = "CPU"
+        scene.cycles.samples = 32
+        scene.cycles.use_denoising = False
+    else:
+        try:
+            scene.render.engine = "BLENDER_EEVEE_NEXT"
+        except Exception:
+            scene.render.engine = "BLENDER_EEVEE"
     scene.render.resolution_x = 960
     scene.render.resolution_y = 720
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
 
-    world = bpy.data.worlds.new("ReportWorld")
-    scene.world = world
-    world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
-    if bg:
-        bg.inputs[0].default_value = (0.015, 0.017, 0.025, 1.0)
-        bg.inputs[1].default_value = 1.0
+    if engine != "WORKBENCH":
+        world = bpy.data.worlds.new("ReportWorld")
+        scene.world = world
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get("Background")
+        if bg:
+            bg.inputs[0].default_value = (0.015, 0.017, 0.025, 1.0)
+            bg.inputs[1].default_value = 1.0
 
     def sun(name, energy, rx, rz):
         data = bpy.data.lights.new(name, "SUN")
@@ -427,11 +533,13 @@ def apply_frame(state: dict, plan: dict, frame: dict):
 # Main
 # ---------------------------------------------------------------------------
 
-def render_plan_file(plan_path: str) -> dict:
+def render_plan_file(plan_path: str, engine: str = None) -> dict:
     if not BLENDER_AVAILABLE:
         print("[ReportImages] ERROR: bpy not available. "
               "Run inside Blender.")
         return {"ok": False, "reason": "bpy unavailable"}
+    engine = resolve_engine(engine)
+    print(f"PUROMO_ENGINE {engine}")
     with open(plan_path) as f:
         plan = json.load(f)
 
@@ -442,7 +550,9 @@ def render_plan_file(plan_path: str) -> dict:
           f"({plan.get('model')}) — {len(plan['frames'])} frames")
     clear_scene()
     state = build_scene(plan)
-    cam_obj = setup_render_rig(plan)
+    if engine == "WORKBENCH":
+        apply_object_colors(state)
+    cam_obj = setup_render_rig(plan, engine)
     scene = bpy.context.scene
 
     results = []
@@ -455,12 +565,16 @@ def render_plan_file(plan_path: str) -> dict:
         ok = os.path.exists(path) and os.path.getsize(path) > 0
         print(f"[ReportImages] step {frame['step_index']}: "
               f"{frame['filename']} {'OK' if ok else 'FAILED'}")
+        if ok:
+            stem = frame["filename"].rsplit(".", 1)[0]
+            print(f"PUROMO_FRAME_OK {stem} engine={engine}")
         results.append({"step_index": frame["step_index"],
                         "title": frame["title"],
                         "filename": frame["filename"], "ok": ok})
 
     manifest = {"design_hash": plan["design_hash"],
-                "model": plan.get("model"), "frames": results}
+                "model": plan.get("model"), "engine": engine,
+                "frames": results}
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
     done = sum(1 for r in results if r["ok"])
@@ -476,8 +590,11 @@ def main(argv=None):
         argv = argv[argv.index("--") + 1:]
     parser = argparse.ArgumentParser()
     parser.add_argument("--plan", required=True)
+    parser.add_argument("--engine", default=None,
+                        help="EEVEE | WORKBENCH | CYCLES "
+                             "(or env PUROMO_RENDER_ENGINE)")
     args = parser.parse_args(argv)
-    result = render_plan_file(args.plan)
+    result = render_plan_file(args.plan, engine=args.engine)
     if not result.get("ok"):
         print(f"[ReportImages] INCOMPLETE: {result}")
 
