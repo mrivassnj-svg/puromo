@@ -660,6 +660,10 @@ def report_images_status(design_hash: str):
                 filenames = [f["filename"] for f in m.get("frames", [])]
             except Exception:
                 filenames = []
+    if not filenames and img_dir.exists():
+        # No plan/manifest on record (e.g. server restarted before any
+        # job ran): the PNGs on disk are the ground truth.
+        filenames = sorted(p.name for p in img_dir.glob("step_*.png"))
     present = [fn for fn in filenames if (img_dir / fn).exists()]
     total = len(filenames)
     job = REPORT_IMAGE_JOBS.get(design_hash) or {}
