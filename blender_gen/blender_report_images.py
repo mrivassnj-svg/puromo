@@ -208,6 +208,35 @@ def frame_camera(bbox, view, fov_deg=CAMERA_FOV_DEG):
     return location, centre
 
 
+def _bbox_radius(bbox):
+    (x0, y0, z0), (x1, y1, z1) = bbox
+    return 0.5 * math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2
+                           + (z1 - z0) ** 2)
+
+
+def sane_bbox(bbox, fallback):
+    """Guard the per-frame camera measurement (Requirement 10).
+    A measured bbox whose size or centre is wildly off the
+    device's own fallback box cannot be the subject — an
+    unevaluated curve or a stale matrix once framed the whole
+    device as a speck in an empty frame. Falls back instead."""
+    if bbox is None:
+        return fallback
+    fr = _bbox_radius(fallback)
+    if fr <= 0:
+        return bbox
+    if _bbox_radius(bbox) > 2.5 * fr:
+        return fallback
+    (ax0, ay0, az0), (ax1, ay1, az1) = bbox
+    (bx0, by0, bz0), (bx1, by1, bz1) = fallback
+    ac = ((ax0 + ax1) / 2, (ay0 + ay1) / 2, (az0 + az1) / 2)
+    bc = ((bx0 + bx1) / 2, (by0 + by1) / 2, (bz0 + bz1) / 2)
+    dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(ac, bc)))
+    if dist > 2.0 * fr:
+        return fallback
+    return bbox
+
+
 # ---------------------------------------------------------------------------
 # Scene construction (bpy only)
 # ---------------------------------------------------------------------------
@@ -297,6 +326,45 @@ def build_host_board(plan: dict, geom: dict, z_mm: float, col) -> list:
     return objs
 
 
+def _ensure_lid_window(plan: dict, geom: dict, lid, layout: dict):
+    """Guarantee the lid's display window is open in the render
+    scene. Raycasts from above the closed lid down the cutout
+    centre: passing through (or hitting the glass stack below)
+    means the window exists; hitting the lid means it does not,
+    and a single full-depth box cut opens it. All guarded — any
+    failure leaves the lid exactly as built and logs why."""
+    dc = geom.get("display_cutout") or {}
+    if not dc.get("w", 0):
+        return
+    try:
+        _update_depsgraph()
+        lt = float(geom.get("lid_thickness_mm", 1.8))
+        cx = float(dc["x"]) + float(dc["w"]) / 2.0
+        cy = float(dc["y"]) + float(dc["h"]) / 2.0
+        top_z = layout["lid_closed_bottom_mm"] + lt
+        origin = (mm(cx), mm(cy), mm(top_z + 5.0))
+        dg = bpy.context.evaluated_depsgraph_get()
+        hit, _loc, _n, _i, obj, _m = bpy.context.scene.ray_cast(
+            dg, origin, (0.0, 0.0, -1.0))
+        if hit and obj is not None and obj.name == lid.name:
+            cols_lid = lid.users_collection[0] \
+                if lid.users_collection else None
+            cutter = bsg.make_box_cutter(
+                "DispWindow_Heal", mm(float(dc["x"])),
+                mm(float(dc["y"])),
+                mm(layout["lid_closed_bottom_mm"] - 0.1),
+                mm(float(dc["w"])), mm(float(dc["h"])),
+                mm(lt + 0.2), cols_lid)
+            bsg.bool_cut(lid, cutter)
+            _update_depsgraph()
+            print("[ReportImages] lid display window was closed "
+                  "— opened it for the render scene")
+        else:
+            print("[ReportImages] lid display window verified open")
+    except Exception as e:
+        print(f"[ReportImages] lid window check skipped: {e}")
+
+
 def build_scene(plan: dict) -> dict:
     """Build every group of the design's board set. Returns state:
     {groups: {name: [objects]}, lid_riders: [objects],
@@ -317,6 +385,15 @@ def build_scene(plan: dict) -> dict:
     lid_base_z[id(lid)] = mm(layout["lid_shift_mm"])
     lid.location.z = lid_base_z[id(lid)]
     lid_riders = [lid]
+
+    # ── Lid display window (Requirement 10): the staged boolean
+    # cuts in build_shell_lid do not open the window in the
+    # rendered scene on the user's Blender (every Pi frame shows a
+    # solid lid over the display, so the glass — and the hero's
+    # lit screen — can never be seen). Verify with a raycast down
+    # the cutout centre; if the lid blocks it, open the window
+    # with one full-depth cut. A no-op when the window is open.
+    _ensure_lid_window(plan, geom, lid, layout)
 
     # ── Heat-set inserts in the case bosses (shell coords) ──
     m_brass = _mat_col("Brass_Insert", 0.72, 0.52, 0.20,
@@ -611,14 +688,16 @@ def setup_render_rig(plan: dict, engine: str = "EEVEE"):
     # Colour management: AgX + a slight exposure lift so mid-tone
     # parts separate from the backdrop (guarded — property names
     # vary across Blender versions).
-    if engine == "EEVEE":
+    if engine in ("EEVEE", "CYCLES"):
         try:
             scene.view_settings.view_transform = "AgX"
         except Exception:
             pass
-    if engine in ("EEVEE", "CYCLES"):
+        # Requirement 10: the 0.25 exposure lift blew the white
+        # shell out to near-transparency against the bright
+        # backdrop — highlights must hold for a printable read.
         try:
-            scene.view_settings.exposure = 0.25
+            scene.view_settings.exposure = 0.0
         except Exception:
             pass
 
@@ -630,8 +709,8 @@ def setup_render_rig(plan: dict, engine: str = "EEVEE"):
         scene.collection.objects.link(obj)
         return obj
 
-    sun("KeyLight", 4.0, 55, 35)
-    sun("FillLight", 2.2, 70, -120)
+    sun("KeyLight", 3.2, 55, 35)
+    sun("FillLight", 1.8, 70, -120)
     sun("RimLight", 2.6, 120, 180)
 
     cam_data = bpy.data.cameras.new("ReportCamera")
@@ -732,12 +811,25 @@ def _obj_world_bbox(o):
     return centre, min(p[2] for p in pts)
 
 
+def _update_depsgraph():
+    """Force depsgraph evaluation so matrix_world / bound_box
+    reflect the frame state just set. Without this, the first
+    frame that shows a not-yet-evaluated object (the USB cable
+    curve) measures a phantom bounding box, and kit-layout moves
+    are framed on pre-move positions (Requirement 10)."""
+    try:
+        bpy.context.view_layer.update()
+    except Exception:
+        pass
+
+
 def apply_kit_layout(state: dict, plan: dict):
     """Spread the printed parts as a laid-out kit for the step-1
     photograph: bottom case at the origin area, lid slid +X clear of
     it, button caps (printed parts too, though their assembly step
     comes later) unhidden in a row on the ground in front (-Y).
     Returns the saved state for restore_layout()."""
+    _update_depsgraph()
     geom = plan.get("geom") or {}
     W = float(geom.get("shell_width_mm") or 70)
     saved = []
@@ -885,7 +977,8 @@ def render_plan_file(plan_path: str, engine: str = None) -> dict:
             # The from-below inserts shot looks up at the bosses —
             # the workbench itself would block it.
             ground.hide_render = (view == "below")
-        bbox = visible_bbox(state) or _fallback_bbox(plan)
+        _update_depsgraph()
+        bbox = sane_bbox(visible_bbox(state), _fallback_bbox(plan))
         location, target = frame_camera(bbox, view)
         point_camera(cam_obj, location, target)
         screen_saved = None
