@@ -270,14 +270,17 @@ class DimensionMath:
         if dw == 0 or dh == 0:
             return  # no display
 
-        # Display is typically centred on board (Waveshare HATs: adjust for joystick side)
-        # Waveshare 1.3" HAT: display is offset toward the GPIO header side
-        vendor = self.s.get("vendor", "").lower()
-        if "waveshare" in vendor or self.s.get("controller_ic", "") in ("ST7789", "ST7735"):
-            # Display on left portion of board; joystick + buttons on right
-            # Board coord: display centered at ~x=bw*0.33, y=bh/2
-            disp_cx_on_board = bw * 0.33
-            disp_cy_on_board = bh / 2.0
+        # Display position on the board: the spec's explicit
+        # offsets are the source of truth; otherwise the display
+        # is centred on the board. (The real Waveshare 1.3" HAT:
+        # joystick left, display centred, keys right — an earlier
+        # bw*0.33 assumption put the window left of centre and
+        # disagreed with the physical board.)
+        ox = self.s.get("display_offset_x_mm")
+        oy = self.s.get("display_offset_y_mm")
+        if ox is not None and oy is not None:
+            disp_cx_on_board = float(ox) + dw / 2.0
+            disp_cy_on_board = float(oy) + dh / 2.0
         else:
             disp_cx_on_board = bw / 2.0
             disp_cy_on_board = bh / 2.0

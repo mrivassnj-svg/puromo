@@ -763,7 +763,7 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
     m_silk    = _mat_col("PCB_Silk",       0.90, 0.90, 0.90, roughness=0.8)    # white silkscreen
     m_disp_bezel = _mat_col("Disp_Bezel", 0.70, 0.70, 0.73, metallic=0.6, roughness=0.25)  # silver
     m_disp_screen= _mat_col("Disp_Screen", 0.04, 0.04, 0.06, metallic=0.0, roughness=0.05) # black glass
-    m_disp_light = _mat_col("Disp_Glow",  0.12, 0.35, 0.65, roughness=0.0, emission_strength=0.8)  # blue-white IPS glow
+    m_disp_light = _mat_col("Disp_Glow",  0.12, 0.35, 0.65, roughness=0.0, emission_strength=0.35)  # glass sheen (not a backlight)
     m_ribbon  = _mat_col("Ribbon_FPC",    0.65, 0.60, 0.20, roughness=0.4)     # golden flex ribbon
     m_joy_base= _mat_col("Joy_Base",      0.18, 0.18, 0.20, roughness=0.55)    # dark grey joystick base
     m_joy_nub = _mat_col("Joy_Nub",       0.28, 0.28, 0.30, roughness=0.45)    # lighter grey nub
@@ -785,8 +785,14 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
 
     # ── 2. Display module ────────────────────────────────────────────────────
     # Spec provides display_offset_x/y from board corner
-    dx_off = mm(spec.get("display_offset_x_mm", 2.0))
-    dy_off = mm(spec.get("display_offset_y_mm", 2.0))
+    # Default (no spec offsets): the display is centred on the
+    # board, as on the real HAT — not tucked into a corner.
+    dx_off = mm(spec.get("display_offset_x_mm",
+                         (spec["board_width_mm"]
+                          - spec.get("display_width_mm", 23.4)) / 2.0))
+    dy_off = mm(spec.get("display_offset_y_mm",
+                         (spec["board_height_mm"]
+                          - spec.get("display_height_mm", 23.4)) / 2.0))
     DW     = mm(spec.get("display_width_mm",  23.4))
     DH     = mm(spec.get("display_height_mm", 23.4))
     # For portrait displays (height > width), dimensions stay as declared.
@@ -803,18 +809,23 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
                    m_disp_bezel, col)
     objs.append(mod)
 
-    # Screen surface (black glass over active area)
+    # Screen surface (black glass over the active area, inset so
+    # the module's silver rim stays visible around it — the panel
+    # reads as a screen, not a slab)
     screen = _add_box("Disp_Screen",
-                      disp_x, disp_y, z_offset + BT + MOD_H - mm(0.1),
-                      DW, DH, SCR_H + mm(0.1),
+                      disp_x + BEZEL, disp_y + BEZEL,
+                      z_offset + BT + MOD_H - mm(0.1),
+                      DW - 2*BEZEL, DH - 2*BEZEL, SCR_H + mm(0.1),
                       m_disp_screen, col)
     objs.append(screen)
 
-    # IPS backlight glow layer (very thin, just inside screen)
+    # Glass sheen ON the screen surface (was buried inside the
+    # screen box, where no camera could ever see it)
     glow = _add_box("Disp_Glow",
-                    disp_x + mm(0.5), disp_y + mm(0.5),
-                    z_offset + BT + MOD_H - mm(0.05),
-                    DW - mm(1.0), DH - mm(1.0), mm(0.15),
+                    disp_x + BEZEL + mm(0.5), disp_y + BEZEL + mm(0.5),
+                    z_offset + BT + MOD_H + SCR_H - mm(0.02),
+                    DW - 2*BEZEL - mm(1.0), DH - 2*BEZEL - mm(1.0),
+                    mm(0.06),
                     m_disp_light, col)
     objs.append(glow)
 
@@ -907,8 +918,11 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
             objs.append(leg)
 
     # ── 6. 40-pin GPIO header ────────────────────────────────────────────────
-    # The 2×20 female header sits at the board's left edge (RPi HAT standard)
-    # Header body: 51.0mm × 5.1mm × 8.5mm (above PCB)
+    # The 2×20 female header hangs BELOW the PCB (it mates with
+    # the host's male header underneath the HAT) — an earlier
+    # version drew it on top of the board, where it read as a
+    # long slab hiding the display and controls.
+    # Header body: 51.0mm × 5.1mm × 8.5mm (below PCB)
     H_W  = mm(51.0)   # 20 × 2.54mm pitch
     H_D  = mm(5.1)    # 2 rows × 2.54mm + slight overhang
     H_H  = mm(8.5)    # standard 11mm header above PCB = 8.5mm plastic body
@@ -917,28 +931,29 @@ def build_pcb_assembly(spec: dict, geom: dict, z_offset: float, col) -> list:
     H_Y  = mm(3.5)
 
     hdr = _add_box("GPIO_Header",
-                   H_X, H_Y, z_offset + BT,
+                   H_X, H_Y, z_offset - H_H,
                    H_W, H_D, H_H,
                    m_gpio_body, col)
     objs.append(hdr)
 
-    # Pin rows (gold — 2 rows × 20 pins)
+    # Socket rims on the header's bottom (mating) face — gold,
+    # 2 rows × 20. (The old code drew full-length pins INSIDE
+    # the body, where they could never be seen.)
     pin_pitch = mm(2.54)
     pin_r     = mm(0.6)    # pin socket opening radius
     for row in range(2):
         for col_idx in range(20):
             px = H_X + mm(1.27) + col_idx * pin_pitch
             py = H_Y + mm(1.27) + row * pin_pitch
-            # Gold inner socket
             pin = _add_cylinder(f"GPIO_Pin_{row}_{col_idx}",
-                                  px, py, z_offset + BT + mm(0.5),
-                                  pin_r, H_H - mm(1.0),
+                                  px, py, z_offset - H_H,
+                                  pin_r, mm(0.8),
                                   m_gpio_pin, col)
             objs.append(pin)
 
     # ── 7. Controller IC (ST7789 or equiv) ───────────────────────────────────
     # Small QFP chip near the display, slightly right of centre-bottom
-    ic_x = mm(spec.get("display_offset_x_mm", 2.0)) + DW + mm(2.0)
+    ic_x = dx_off + DW + mm(2.0)
     ic_y = dy_off + mm(2.0)
     IC_W = mm(5.5)   # QFP body
     IC_D = mm(5.5)
@@ -1088,9 +1103,14 @@ def generate_shell(spec_path: str, output_dir: str = "output"):
     # Inject display offset if not already in spec
     spec_for_pcb = dict(raw_spec)
     if "display_offset_x_mm" not in spec_for_pcb:
+        # The geometry cutout is in SHELL coords; the replica
+        # wants BOARD coords: remove the PCB offset, add back
+        # the bezel lip the cutout was shrunk by (0.8 mm).
         dc = geom.get("display_cutout", {})
-        spec_for_pcb["display_offset_x_mm"] = dc.get("x", 2.0)
-        spec_for_pcb["display_offset_y_mm"] = dc.get("y", 2.0)
+        spec_for_pcb["display_offset_x_mm"] = (
+            dc.get("x", 2.0) - geom.get("pcb_offset_x", 0.0) + 0.8)
+        spec_for_pcb["display_offset_y_mm"] = (
+            dc.get("y", 2.0) - geom.get("pcb_offset_y", 0.0) + 0.8)
 
     pcb_objs = build_pcb_assembly(spec_for_pcb, geom, pcb_z, col_pcb)
 
