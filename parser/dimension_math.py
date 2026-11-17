@@ -15,6 +15,7 @@ Covers:
 """
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
@@ -233,11 +234,15 @@ class DimensionMath:
         )
 
         header_variant = self.s.get("gpio_header_variant", "standard_11mm")
+        # Human-readable in user-facing notes (Requirement 10):
+        # 'standard_11mm' → 'Standard 11 mm'.
+        hv_human = re.sub(r"(\d+)mm\b", r"\1 mm",
+                          header_variant.replace("_", " ")).capitalize()
         g.assembly_notes.append(
             f"Shell envelope: {g.shell_width_mm} × {g.shell_height_mm} × {g.shell_depth_mm} mm"
         )
         g.assembly_notes.append(
-            f"Header variant: '{header_variant}'  "
+            f"Header variant: {hv_human}  "
             f"mated gap={mated_gap} mm  "
             f"tallest above HAT={round(above_hat_pcb - COMPONENT_CLEARANCE, 1)} mm  "
             f"(+{COMPONENT_CLEARANCE} mm clearance)"

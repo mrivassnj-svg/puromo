@@ -214,7 +214,7 @@ SCHEDULER_DESIGN = {
             "name":     "input_poll_task",
             "interval_ms": 10,     # 100Hz input polling
             "priority": "HIGH",
-            "description": "Read GPIO buttons + MCP3008 joystick ADC; emit events",
+            "description": "Read GPIO buttons + joystick input; emit events",
             "cpu_budget_pct": 10,
         },
         {

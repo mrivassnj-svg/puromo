@@ -305,11 +305,13 @@ class AssemblySpecGenerator:
         return {
             "fasteners": {
                 "M2.5_screws_6mm": {
+                    "description": "M2.5 × 6mm Phillips Head Screw",
                     "qty":     boss_count,
                     "purpose": "PCB standoff to printed boss",
                     "source":  "M2.5×6 DIN7985",
                 },
                 "M2.5_heatset_inserts": {
+                    "description": "M2.5 × 3.5mm Brass Heat-Set Insert",
                     "qty":     boss_count,
                     "purpose": "Press into printed bosses for reusable threads",
                     "tool":    "Soldering iron or heat-set tool at 200°C",

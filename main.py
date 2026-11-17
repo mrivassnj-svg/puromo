@@ -526,8 +526,17 @@ def generate_report(req: ReportRequest):
         _consolidate_image_store()
         resolved = _resolve(req.spec, req.selection)
         design_hash = resolved["design_hash"]
+        # Requirement 10: §1 names the design's chosen main board,
+        # not just the HAT's compatibility list.
+        brain_name = ""
+        if req.selection and req.selection.get("brain_id"):
+            for b in _load_registry("brains"):
+                if b.get("id") == req.selection["brain_id"]:
+                    brain_name = b.get("name", "")
+                    break
         gen = PDFReportGenerator(
             device_name    = req.device_name,
+            brain_name     = brain_name,
             spec           = resolved["spec"],
             geom           = req.geom,
             pinout         = req.pinout,

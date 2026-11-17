@@ -109,6 +109,12 @@ def _styles():
         "note":  ParagraphStyle("note",
             fontName="Helvetica-Oblique", fontSize=8, textColor=C_MUTED,
             spaceAfter=1*mm, leading=12),
+        "cell":  ParagraphStyle("cell",
+            fontName="Helvetica", fontSize=8, textColor=C_TEXT,
+            leading=11),
+        "cellh": ParagraphStyle("cellh",
+            fontName="Helvetica-Bold", fontSize=8, textColor=C_ACCENT,
+            leading=11),
         "warn":  ParagraphStyle("warn",
             fontName="Helvetica-Bold", fontSize=8, textColor=C_RED,
             spaceAfter=1*mm),
@@ -174,6 +180,14 @@ def _page_header_footer(canvas, doc):
     canvas.drawRightString(PAGE_W - MARGIN, 3.5*mm,
         f"Page {doc.page}  |  Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     canvas.restoreState()
+
+def _human_variant(v: str) -> str:
+    """'standard_11mm' → 'Standard 11 mm'; 'soldered_direct' →
+    'Soldered direct'. Internal variant IDs never reach the page."""
+    import re as _re
+    s = _re.sub(r"(\d+)mm\b", r"\1 mm", str(v).replace("_", " "))
+    return s[:1].upper() + s[1:] if s else s
+
 
 def _cover_page(canvas, doc):
     canvas.saveState()
@@ -298,7 +312,8 @@ class PDFReportGenerator:
                  assembly_specs: dict,
                  output_path: str,
                  design_hash: str = "",
-                 images_dir: Optional[str] = None):
+                 images_dir: Optional[str] = None,
+                 brain_name: str = ""):
         self.device_name    = device_name
         self.spec           = spec
         self.geom           = geom
@@ -312,6 +327,10 @@ class PDFReportGenerator:
         # another design's report.
         self.design_hash    = design_hash
         self.images_dir     = images_dir
+        # Requirement 10: the design's chosen main board, named by
+        # main.py from the selection + brains registry ("" when the
+        # design has no explicit brain choice).
+        self.brain_name     = brain_name
         self.st             = _styles()
 
     def generate(self) -> str:
@@ -414,17 +433,21 @@ class PDFReportGenerator:
             ["Controller IC",      s.get("controller_ic","—")],
             ["Communication Bus",  s.get("interface","—")],
             ["Operating Voltage",  f"{s.get('voltage_v',3.3)} V"],
-            ["Host Board",         ", ".join(s.get("compatible_boards",[]) or ["—"])],
+            *( [["Host Board (your design)", self.brain_name]] if self.brain_name else [] ),
+            ["HAT Compatibility",  ", ".join(s.get("compatible_boards",[]) or ["—"])],
             ["GPIO Header",        f"{s.get('gpio_rows',2)}×{s.get('gpio_cols',20)} "
                                    f"({s.get('gpio_rows',2)*s.get('gpio_cols',20)} pins)  "
                                    f"pitch {s.get('gpio_header_pitch_mm',2.54)} mm"],
-            ["Header Variant",     s.get("gpio_header_variant","standard_11mm")],
+            ["Header Variant",     _human_variant(s.get("gpio_header_variant","standard_11mm"))],
             ["Mated Stack Gap",    f"{s.get('gpio_header_mated_gap_mm',11.5)} mm"],
             ["PCB Dimensions",     f"{s.get('board_width_mm',0)}×"
                                    f"{s.get('board_height_mm',0)}×"
                                    f"{s.get('board_thickness_mm',1.6)} mm"],
             ["Tallest Component",  f"{s.get('tallest_component_mm',0)} mm  "
                                    f"({s.get('tallest_component_label','—')})"],
+            ["Header Above HAT",   f"{s.get('gpio_header_above_mm',8.5)} mm  "
+                                   f"(stack clearance uses the greater of "
+                                   f"component height and header height)"],
         ]
         tbl = Table(rows, colWidths=[55*mm, INNER_W-55*mm])
         tbl.setStyle(dark_table_style())
@@ -434,7 +457,7 @@ class PDFReportGenerator:
             f"({s.get('vendor','—').title()}), a {s.get('interface','SPI')}-interfaced "
             f"display/input HAT controlled by the <b>{s.get('controller_ic','ST7789')}</b> IC. "
             f"The host Raspberry Pi connects via its 40-pin GPIO header using a "
-            f"<b>{s.get('gpio_header_variant','standard_11mm').replace('_',' ')}</b> female header "
+            f"<b>{_human_variant(s.get('gpio_header_variant','standard_11mm'))}</b> female header "
             f"creating a {s.get('gpio_header_mated_gap_mm',11.5)} mm board-to-board gap. "
             f"All logic signals operate at <b>3.3 V</b> — 5 V levels will damage the HAT. "
             f"The complete shell envelope measures "
@@ -569,10 +592,10 @@ class PDFReportGenerator:
                     row["module_pin"],
                     str(row["bcm"]),
                     str(row["phys_pin"]),
-                    row["gpio_name"][:22],
+                    Paragraph(row["gpio_name"], st["cell"]),
                     row["wire_name"],
                     "✓" if row["required"] else "opt",
-                    Paragraph(row["note"][:55], st["mono_sm"]),
+                    Paragraph(row["note"], st["cell"]),
                 ])
             t = Table(rows,
                       colWidths=[18*mm,10*mm,10*mm,40*mm,22*mm,8*mm,
@@ -590,7 +613,7 @@ class PDFReportGenerator:
                         sig,
                         str(info.get("gpio_key","—")),
                         info.get("role","—"),
-                        Paragraph(info.get("note","")[:60], st["mono_sm"]),
+                        Paragraph(info.get("note",""), st["cell"]),
                     ])
                 t2 = Table(ex_rows,
                            colWidths=[22*mm,20*mm,18*mm,INNER_W-60*mm])
@@ -655,8 +678,10 @@ class PDFReportGenerator:
         story.append(t)
         story.append(Spacer(1, 4*mm))
 
-        # Wiring safety rules
+        # Wiring safety rules — module-specific rules appear only
+        # when the module is in THIS design (Requirement 10).
         story.append(Paragraph("Critical Wiring Rules:", st["h2"]))
+        _sel = set(p.get("selected_modules") or [])
         rules = [
             "NEVER connect 5V to any HAT GPIO signal line — maximum 3.3V.",
             "ALWAYS wire all GND lines to a common ground point before powering up.",
@@ -664,9 +689,11 @@ class PDFReportGenerator:
             "RST pulse: hold LOW ≥ 10µs, then HIGH; wait ≥ 120ms before first SPI command.",
             "SPI MOSI/MISO/SCLK are shared — only the CS line distinguishes devices.",
             "I2C pull-up resistors (4.7kΩ to 3.3V) required when adding non-HAT I2C devices.",
-            "NeoPixel/WS2812B: add 300–500Ω on data line; 1000µF cap across 5V/GND at strip.",
-            "Battery: NEVER connect backwards. Always use a battery with a protection PCB.",
         ]
+        if "neopixel_ws2812b" in _sel:
+            rules.append("NeoPixel/WS2812B: add 300–500Ω on data line; 1000µF cap across 5V/GND at strip.")
+        if "lipo_tp4056" in _sel:
+            rules.append("Battery: NEVER connect backwards. Always use a battery with a protection PCB.")
         for r in rules:
             story.append(Paragraph(f"⚠  {r}", st["warn"]))
 
@@ -674,9 +701,61 @@ class PDFReportGenerator:
         return story
 
     # ── 6. Firmware Architecture ─────────────────────────────────
+    # Requirement 10: the firmware section describes THIS design's
+    # firmware. The architecture payload is the full framework
+    # reference (every driver/task/event the firmware knows); the
+    # report keeps only what the design's selected modules use,
+    # plus the always-present core. With no module information in
+    # the payload, nothing is filtered (legacy payloads).
+    _FW_DRIVER_SCOPE = {
+        "display_st7789":  {"waveshare_lcd_hat_st7789"},
+        "display_ssd1306": {"i2c_oled_ssd1306"},
+        "backlight_pwm":   {"waveshare_lcd_hat_st7789"},
+        "buttons":         {"waveshare_lcd_hat_st7789", "tactile_button"},
+        "joystick_adc":    {"analog_joystick_mcp3008"},
+        "imu_mpu6050":     {"imu_mpu6050"},
+        "audio_pwm":       {"audio_jack_3_5mm"},
+        "neopixel":        {"neopixel_ws2812b"},
+        "sd_card":         {"microsd_spi"},
+        "battery_monitor": {"lipo_tp4056"},
+        "spi_bus":         {"waveshare_lcd_hat_st7789",
+                            "analog_joystick_mcp3008", "microsd_spi"},
+        "i2c_bus":         {"i2c_oled_ssd1306", "imu_mpu6050"},
+    }
+    _FW_TASK_SCOPE = {
+        "display_render_task": {"waveshare_lcd_hat_st7789",
+                                "i2c_oled_ssd1306"},
+        "input_poll_task":     {"waveshare_lcd_hat_st7789",
+                                "tactile_button",
+                                "analog_joystick_mcp3008"},
+        "battery_task":        {"lipo_tp4056"},
+        "imu_task":            {"imu_mpu6050"},
+    }
+    _FW_EVENT_SCOPE = {
+        "ButtonPressed":  {"waveshare_lcd_hat_st7789", "tactile_button"},
+        "ButtonReleased": {"waveshare_lcd_hat_st7789", "tactile_button"},
+        "JoystickMoved":  {"waveshare_lcd_hat_st7789",
+                           "analog_joystick_mcp3008"},
+        "DisplayReady":   {"waveshare_lcd_hat_st7789",
+                           "i2c_oled_ssd1306"},
+        "DisplayFrame":   {"waveshare_lcd_hat_st7789",
+                           "i2c_oled_ssd1306"},
+        "BatteryUpdate":  {"lipo_tp4056"},
+        "IMUData":        {"imu_mpu6050"},
+        "AudioPlay":      {"audio_jack_3_5mm"},
+        "NeopixelSet":    {"neopixel_ws2812b"},
+    }
+
+    def _fw_scoped(self, scope_map, name, selected):
+        """True when `name` is core (unscoped) or its scope
+        intersects the design's selected modules."""
+        need = scope_map.get(name)
+        return need is None or bool(need & selected)
+
     def _section_firmware(self):
         st = self.st
         fw = self.fw
+        selected = set(self.pinout.get("selected_modules") or [])
         story = [Paragraph("6. Firmware Architecture & Boot Sequence", st["h1"])]
 
         story.append(Paragraph(
@@ -691,11 +770,14 @@ class PDFReportGenerator:
         story.append(Paragraph("Boot Sequence", st["h2"]))
         rows = [["Phase","Name","Delay","Gate"]]
         for p in fw.get("boot_phases",[]):
+            if (selected and p["name"] == "BATTERY_MONITOR_START"
+                    and "lipo_tp4056" not in selected):
+                continue  # wired design: no battery monitor phase
             rows.append([
                 str(p["phase"]),
                 p["name"],
                 f"{p['delay_ms']}ms",
-                p["gate"][:48],
+                Paragraph(p["gate"], st["cell"]),
             ])
         t = Table(rows, colWidths=[12*mm,50*mm,15*mm,INNER_W-77*mm])
         t.setStyle(dark_table_style())
@@ -705,6 +787,9 @@ class PDFReportGenerator:
         # Driver load order
         story.append(Paragraph("Driver Load Order (Topological)", st["h2"]))
         order = fw.get("driver_load_order",[])
+        if selected:
+            order = [d for d in order
+                     if self._fw_scoped(self._FW_DRIVER_SCOPE, d, selected)]
         order_text = "  →  ".join(order)
         story.append(Paragraph(order_text, st["mono_sm"]))
         story.append(Spacer(1,3*mm))
@@ -712,17 +797,21 @@ class PDFReportGenerator:
         # Scheduler tasks
         story.append(Paragraph("Cooperative Task Scheduler", st["h2"]))
         sched = fw.get("scheduler",{})
-        rows2 = [["Task","Interval","Priority","CPU Budget","Description"]]
+        rows2 = [[Paragraph(h, st["cellh"]) for h in
+                  ["Task","Interval","Priority","CPU Budget","Description"]]]
         for t_data in sched.get("tasks",[]):
+            if selected and not self._fw_scoped(
+                    self._FW_TASK_SCOPE, t_data["name"], selected):
+                continue
             rows2.append([
                 t_data["name"],
                 f"{t_data['interval_ms']}ms",
                 t_data["priority"],
                 f"{t_data['cpu_budget_pct']}%",
-                t_data["description"][:40],
+                Paragraph(t_data["description"], st["cell"]),
             ])
         t2 = Table(rows2,
-                   colWidths=[40*mm,16*mm,16*mm,16*mm,INNER_W-88*mm])
+                   colWidths=[38*mm,15*mm,15*mm,17*mm,INNER_W-85*mm])
         t2.setStyle(dark_table_style())
         story.append(t2)
         story.append(Spacer(1,3*mm))
@@ -731,7 +820,12 @@ class PDFReportGenerator:
         story.append(Paragraph("EventBus Message Types", st["h2"]))
         rows3 = [["Event Type","Fields"]]
         for ev, data in fw.get("event_types",{}).items():
-            rows3.append([ev, ", ".join(data["fields"]) if data["fields"] else "—"])
+            if selected and not self._fw_scoped(
+                    self._FW_EVENT_SCOPE, ev, selected):
+                continue
+            rows3.append([ev, Paragraph(
+                ", ".join(data["fields"]) if data["fields"] else "—",
+                st["cell"])])
         t3 = Table(rows3, colWidths=[40*mm, INNER_W-40*mm])
         t3.setStyle(dark_table_style())
         story.append(t3)
@@ -750,11 +844,13 @@ class PDFReportGenerator:
         fas  = a.get("bom_hardware",{}).get("fasteners",{})
         ws   = a.get("bom_hardware",{}).get("waveshare_hat",{})
         rows = [["Item","Qty","Purpose"]]
-        for d in list(fas.values()) + list(ws.values()):
+        for key, d in (list(fas.items()) + list(ws.items())):
+            name = (d.get("description") or d.get("name")
+                    or key.replace("_", " "))
             rows.append([
-                d.get("description","")[:45],
+                Paragraph(name, st["cell"]),
                 str(d.get("qty","—")),
-                d.get("purpose","")[:40],
+                Paragraph(d.get("purpose",""), st["cell"]),
             ])
         t = Table(rows, colWidths=[68*mm,12*mm,INNER_W-80*mm])
         t.setStyle(dark_table_style())
@@ -862,11 +958,7 @@ class PDFReportGenerator:
         if conflicts:
             story.append(Paragraph("⚠ GPIO Conflicts Detected:", st["warn"]))
             for c in conflicts:
-                story.append(Paragraph(
-                    f"  GPIO {c['gpio_key']} (BCM {c['bcm']}, Phys P{c['phys_pin']}): "
-                    f"{c['note']}",
-                    st["warn"]
-                ))
+                story.append(Paragraph(f"  {c['note']}", st["warn"]))
         else:
             story.append(Paragraph("✓ No GPIO conflicts detected.", st["safe"]))
 
