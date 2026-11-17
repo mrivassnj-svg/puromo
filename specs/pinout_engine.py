@@ -406,14 +406,16 @@ MODULE_PINOUTS = {
 # Conflict detection
 # ---------------------------------------------------------------------------
 
-def detect_conflicts(selected_modules: List[str]) -> List[dict]:
-    """
-    Check for GPIO pin conflicts across all selected modules.
-    Returns list of conflict dicts.
-    """
-    pin_usage: Dict[str, List[str]] = {}  # gpio_key → [module_labels]
-    conflicts = []
-
+# Shared-bus lines (Requirement 10): SPI MOSI/MISO/SCLK and I2C
+# SDA/SCL are shared by design — every device on the bus uses them,
+# distinguished by chip-select (SPI) or address (I2C). Claiming one
+# of these pins in a bus role is never a conflict. The constants
+# live further down this module (SHARED_BUS_PINS / BUS_ROLES) and
+# are resolved at call time.
+def _pin_claims(selected_modules: List[str]) -> Dict[str, dict]:
+    """gpio_key → {"modules": [labels], "roles": [roles]} for every
+    non-power claim across the selected modules."""
+    claims: Dict[str, dict] = {}
     for mod_key in selected_modules:
         mod = MODULE_PINOUTS.get(mod_key)
         if not mod:
@@ -421,21 +423,60 @@ def detect_conflicts(selected_modules: List[str]) -> List[dict]:
         for pin in mod["pins"]:
             gk = pin.get("gpio_key")
             if gk and pin["role"] not in ("GND", "3V3", "5V"):
-                pin_usage.setdefault(gk, []).append(mod["label"])
+                e = claims.setdefault(gk, {"modules": [], "roles": []})
+                if mod["label"] not in e["modules"]:
+                    e["modules"].append(mod["label"])
+                e["roles"].append(pin["role"])
+    return claims
 
-    for gpio_key, modules in pin_usage.items():
-        if len(modules) > 1:
-            gpio_info = RPI_GPIO.get(gpio_key, {})
-            conflicts.append({
-                "gpio_key":  gpio_key,
-                "phys_pin":  gpio_info.get("phys"),
-                "bcm":       gpio_info.get("bcm"),
-                "conflict_between": modules,
-                "severity":  "ERROR",
-                "note":      f"GPIO {gpio_key} claimed by {len(modules)} modules simultaneously",
-            })
 
+def _is_shared_bus_claim(gpio_key: str, claim: dict) -> bool:
+    return (gpio_key in SHARED_BUS_PINS and claim["roles"]
+            and all(r in BUS_ROLES for r in claim["roles"]))
+
+
+def detect_conflicts(selected_modules: List[str]) -> List[dict]:
+    """
+    Check for GPIO pin conflicts across all selected modules.
+    Shared-bus pins claimed only in bus roles are NOT conflicts
+    (see detect_shared_buses). Returns list of conflict dicts whose
+    notes name the modules involved.
+    """
+    conflicts = []
+    for gpio_key, claim in _pin_claims(selected_modules).items():
+        if len(claim["modules"]) <= 1:
+            continue
+        if _is_shared_bus_claim(gpio_key, claim):
+            continue
+        gpio_info = RPI_GPIO.get(gpio_key, {})
+        modules = claim["modules"]
+        conflicts.append({
+            "gpio_key":  gpio_key,
+            "phys_pin":  gpio_info.get("phys"),
+            "bcm":       gpio_info.get("bcm"),
+            "conflict_between": modules,
+            "severity":  "ERROR",
+            "note":      (f"{gpio_key} (BCM {gpio_info.get('bcm')}, "
+                          f"physical pin {gpio_info.get('phys')}) is "
+                          f"claimed by {len(modules)} modules — "
+                          f"{' and '.join(modules) if len(modules) == 2 else ', '.join(modules)} "
+                          f"— and is not a shared-bus line"),
+        })
     return conflicts
+
+
+def detect_shared_buses(selected_modules: List[str]) -> List[dict]:
+    """Bus lines legitimately shared by two or more selected
+    modules, reported as information — never as conflicts."""
+    shared = []
+    for gpio_key, claim in _pin_claims(selected_modules).items():
+        if len(claim["modules"]) > 1 and _is_shared_bus_claim(gpio_key, claim):
+            shared.append({
+                "gpio_key": gpio_key,
+                "bus":      SHARED_BUS_PINS[gpio_key],
+                "modules":  claim["modules"],
+            })
+    return shared
 
 
 # ---------------------------------------------------------------------------
@@ -510,8 +551,9 @@ class PinoutEngine:
             "wiring_tables":     wiring_tables,
             "gpio_map":          self._full_gpio_map(selected),
             "conflicts":         conflicts,
+            "shared_buses":      detect_shared_buses(selected),
             "power_budget":      budget,
-            "safety_checklist":  self._safety_checklist(selected),
+            "safety_checklist":  self._safety_checklist(selected, budget),
             "wire_colours":      WIRE_COLOURS,
         }
 
@@ -526,16 +568,21 @@ class PinoutEngine:
         if ic in ("ST7789", "ST7735") or ("waveshare" in vendor and "spi" in iface.lower()):
             mods.append("waveshare_lcd_hat_st7789")
 
-        # Buttons
-        if self.spec.get("button_positions_mm"):
-            mods.append("tactile_button")
+        # Buttons and joystick are NOT separate modules here: on a
+        # HAT they are part of the HAT module itself (its
+        # extra_signals carry KEY1/2/3 and the joystick directions,
+        # wired direct to GPIO). Inferring a discrete tactile-button
+        # module or an MCP3008 ADC joystick from the HAT's spec
+        # fields described hardware the design does not contain
+        # (Requirement 10). Those modules join only when the user
+        # actually selects them (selected_modules below).
 
-        # Joystick
-        if self.spec.get("joystick_diameter_mm", 0) > 0:
-            mods.append("analog_joystick_mcp3008")
-
-        # Always include power
-        mods.append("usbc_power")
+        # Power follows the design's actual power choice (the
+        # resolved spec carries include_battery from the Power tab):
+        # a battery design documents its charger module, a wired
+        # design its USB-C input — never both, never by default.
+        mods.append("lipo_tp4056" if self.spec.get("include_battery")
+                    else "usbc_power")
 
         # Feature Modules tab (framework R1): modules the user explicitly
         # added from the verified registry join the inferred set. Additive —
@@ -608,13 +655,19 @@ class PinoutEngine:
         result.sort(key=lambda x: x["phys"])
         return result
 
-    def _safety_checklist(self, selected: List[str]) -> List[dict]:
+    def _safety_checklist(self, selected: List[str],
+                          budget: dict = None) -> List[dict]:
+        psu_check = "Power supply rated ≥ recommended PSU A"
+        if budget:
+            psu_check = (f"Power supply rated ≥ "
+                         f"{budget.get('recommended_psu_a', 0)} A @ 5V "
+                         f"(this design draws "
+                         f"{budget.get('grand_total_ma', 0)} mA in total)")
         checks = [
             {"check": "All 3.3V signals verified — no 5V GPIO exposure", "status": "verify"},
             {"check": "SPI bus CS lines are unique per device",           "status": "verify"},
             {"check": "I2C addresses are unique (use i2cdetect to confirm)", "status": "verify"},
-            {"check": "Power supply rated ≥ recommended PSU A",           "status": "verify"},
-            {"check": "Battery has built-in protection PCB",              "status": "verify"},
+            {"check": psu_check,                                          "status": "verify"},
             {"check": "All GND lines connected to common ground",         "status": "verify"},
             {"check": "No GPIO sink current exceeds 16mA per pin",        "status": "verify"},
             {"check": "Total GPIO current < 50mA across all pins",        "status": "verify"},
@@ -622,6 +675,9 @@ class PinoutEngine:
             {"check": "SPI enabled in raspi-config",                      "status": "verify"},
             {"check": "I2C enabled in raspi-config",                      "status": "verify"},
         ]
+        if "lipo_tp4056" in selected:
+            checks.append({"check": "Battery has built-in protection PCB",
+                           "status": "verify"})
         for mod_key in selected:
             mod = MODULE_PINOUTS.get(mod_key)
             if mod:
@@ -669,18 +725,14 @@ def verify_pinout(result: dict) -> List[dict]:
                    if not missing else f"missing: {', '.join(missing)}"),
     })
 
-    # 2 — no pin double-claimed beyond the reported conflicts (mirrors
-    # detect_conflicts exactly: same role filter, same counting)
-    pin_usage: Dict[str, List[str]] = {}
-    for mid in selected:
-        mod = MODULE_PINOUTS.get(mid)
-        if not mod:
-            continue
-        for pin in mod["pins"]:
-            gk = pin.get("gpio_key")
-            if gk and pin["role"] not in POWER_ROLES:
-                pin_usage.setdefault(gk, []).append(mod["label"])
-    double_claimed = {k for k, v in pin_usage.items() if len(v) > 1}
+    # 2 — no EXCLUSIVE pin double-claimed beyond the reported
+    # conflicts (mirrors detect_conflicts exactly: same role filter,
+    # same counting, same shared-bus exclusion — bus lines claimed
+    # only in bus roles are shared by design, not double-claimed)
+    double_claimed = {
+        gk for gk, claim in _pin_claims(selected).items()
+        if len(claim["modules"]) > 1 and not _is_shared_bus_claim(gk, claim)
+    }
     reported = {c["gpio_key"] for c in result.get("conflicts", [])}
     checks.append({
         "n": 2,
