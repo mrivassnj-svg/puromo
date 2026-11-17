@@ -353,13 +353,57 @@ class AssemblySpecGenerator:
         }
 
     def _assembly_steps(self) -> list:
+        # Designs whose display is part of the HAT (integrated
+        # display + controls) have no separate display to mount:
+        # step 7 becomes a window/alignment check instead of the
+        # discrete-display VHB procedure, and step 9's advice
+        # matches. (Requirement 11 — the text and the step
+        # images must describe the same build.)
+        integrated = bool(
+            self.spec.get("display_width_mm")
+            and (self.spec.get("joystick_center_mm")
+                 or self.spec.get("button_positions_mm")))
+        if integrated:
+            step7 = {
+                "step": 7,
+                "title": "Display check — lid window",
+                "detail": (
+                    "The display is part of the LCD HAT fitted at Step 4 — "
+                    "there is no separate display to mount. Hold the lid over "
+                    "the HAT and check the display sits centred in the lid "
+                    "window, with the joystick and keys aligned to their "
+                    "apertures. Wipe the glass clean before closing; the "
+                    "printed bezel lip holds the display — no adhesive."
+                ),
+            }
+            step9_tail = (
+                "Check the display sits centred in the lid window. "
+                "If it looks off-centre, re-seat the HAT on its standoffs (Step 4)."
+            )
+        else:
+            step7 = {
+                "step": 7,
+                "title": "Mount display",
+                "detail": (
+                    "Apply 3M VHB 5952 tape to display PCB edges (not active area). "
+                    "Align display through lid cutout recess. Apply even pressure 60 s. "
+                    "Alternative: rely on printed bezel lip press-fit (no adhesive)."
+                ),
+            }
+            step9_tail = (
+                "Check for light leakage around display bezel. "
+                "If leakage, add black craft foam ring to display back."
+            )
         return [
             {
                 "step": 1,
                 "title": "Prepare printed parts",
                 "detail": (
-                    "Remove supports. Sand parting lines on shell_bottom and shell_lid "
-                    "with 220-grit. Test-fit lid on bottom before inserting hardware."
+                    "Lay out every part and check it against the Bill of Materials "
+                    "in this report: printed shell_bottom and shell_lid, host board, "
+                    "LCD HAT, button caps, fasteners and cables. Remove supports "
+                    "from the printed parts and sand parting lines with 220-grit. "
+                    "Test-fit the lid on the bottom case before inserting hardware."
                 ),
             },
             {
@@ -406,15 +450,7 @@ class AssemblySpecGenerator:
                     "Shoulder flange retains cap. Confirm travel = 0.5–1.0 mm before bottoming."
                 ),
             },
-            {
-                "step": 7,
-                "title": "Mount display",
-                "detail": (
-                    "Apply 3M VHB 5952 tape to display PCB edges (not active area). "
-                    "Align display through lid cutout recess. Apply even pressure 60 s. "
-                    "Alternative: rely on printed bezel lip press-fit (no adhesive)."
-                ),
-            },
+            step7,
             {
                 "step": 8,
                 "title": "Close and snap lid",
@@ -429,8 +465,7 @@ class AssemblySpecGenerator:
                 "title": "Power-on and test",
                 "detail": (
                     "Connect power. Verify: display initialises, buttons register, "
-                    "joystick responds. Check for light leakage around display bezel. "
-                    "If leakage, add black craft foam ring to display back."
+                    "joystick responds. " + step9_tail
                 ),
             },
         ]

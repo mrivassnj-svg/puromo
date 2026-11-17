@@ -293,9 +293,13 @@ def build_host_board(plan: dict, geom: dict, z_mm: float, col) -> list:
     objs.append(_add_box("Host_HeaderBase", mm(7.1), mm(3.5),
                          z + mm(T), mm(51.0), mm(5.1), mm(2.5),
                          m_blk, col))
-    objs.append(_add_box("Host_HeaderPins", mm(7.6), mm(4.0),
-                         z + mm(T) + mm(2.5), mm(50.0), mm(4.1),
-                         mm(6.0), m_gold, col))
+    # Two pin rows (was one solid gold slab — it read as a
+    # brass brick between the boards)
+    for r in range(2):
+        objs.append(_add_box(f"Host_HeaderPinRow{r}",
+                             mm(7.6), mm(4.77 + r * 2.54) - mm(0.35),
+                             z + mm(T) + mm(2.5), mm(50.0), mm(0.7),
+                             mm(6.0), m_gold, col))
     # SoC + a secondary IC
     objs.append(_add_box("Host_SoC", mm(W * 0.42), mm(H * 0.38),
                          z + mm(T), mm(12.0), mm(12.0), mm(1.2),
@@ -326,43 +330,79 @@ def build_host_board(plan: dict, geom: dict, z_mm: float, col) -> list:
     return objs
 
 
+def _lid_window_blocked(lid, cx, cy, top_z):
+    """True when solid lid material blocks the display window:
+    a BVH ray straight down the cutout centre hits the lid
+    within one plate thickness of its top. Returns None when
+    the test itself is unavailable (caller then cuts anyway —
+    cutting an open window with the slightly-shrunk heal
+    cutter removes nothing)."""
+    try:
+        from mathutils.bvhtree import BVHTree
+        from mathutils import Vector as _V
+        _update_depsgraph()
+        dg = bpy.context.evaluated_depsgraph_get()
+        bvh = BVHTree.FromObject(lid, dg)
+        origin = _V((cx, cy, top_z))
+        hit = bvh.ray_cast(origin, _V((0.0, 0.0, -1.0)), top_z)
+        if hit[0] is None:
+            return False
+        loc, _n, _idx, _dist = hit
+        # The ray starts 5 mm above the closed lid top; a hit on
+        # the LID within ~7 mm means the plate is in the way.
+        # (The display glass sits further down, behind the
+        # window, and is a different object — BVH is per-object.)
+        return (top_z - loc.z) < 0.0075
+    except Exception:
+        return None
+
+
 def _ensure_lid_window(plan: dict, geom: dict, lid, layout: dict):
     """Guarantee the lid's display window is open in the render
-    scene. Raycasts from above the closed lid down the cutout
-    centre: passing through (or hitting the glass stack below)
-    means the window exists; hitting the lid means it does not,
-    and a single full-depth box cut opens it. All guarded — any
-    failure leaves the lid exactly as built and logs why."""
-    dc = geom.get("display_cutout") or {}
-    if not dc.get("w", 0):
+    scene. The staged boolean cuts in build_shell_lid do not
+    open the window on the user's Blender (every Pi frame
+    showed a solid lid, so the glass — and the hero's lit
+    screen — could never be seen). The R10 raycast version did
+    not open it either, so this version tests with a BVH ray
+    (per-object, version-stable), cuts DEEP (1 mm clearances,
+    like the staged cuts — the R10 cutter spanned the plate
+    with only 0.1 mm to spare, a classic coplanar-face boolean
+    failure), verifies, and retries with the FAST solver. The
+    heal cutter is 0.1 mm smaller than the window, so running
+    it on an already-open window removes nothing."""
+    if not BLENDER_AVAILABLE or lid is None:
         return
+    dc = geom.get("display_cutout") or {}
+    if not dc.get("w"):
+        return
+    lt = float(geom.get("lid_thickness_mm") or 1.8)
+    closed_bottom = float(layout["lid_closed_bottom_mm"])
+    cx = mm(float(dc["x"]) + float(dc["w"]) / 2.0)
+    cy = mm(float(dc["y"]) + float(dc["h"]) / 2.0)
+    top_z = mm(closed_bottom + lt + 5.0)
     try:
-        _update_depsgraph()
-        lt = float(geom.get("lid_thickness_mm", 1.8))
-        cx = float(dc["x"]) + float(dc["w"]) / 2.0
-        cy = float(dc["y"]) + float(dc["h"]) / 2.0
-        top_z = layout["lid_closed_bottom_mm"] + lt
-        origin = (mm(cx), mm(cy), mm(top_z + 5.0))
-        dg = bpy.context.evaluated_depsgraph_get()
-        hit, _loc, _n, _i, obj, _m = bpy.context.scene.ray_cast(
-            dg, origin, (0.0, 0.0, -1.0))
-        if hit and obj is not None and obj.name == lid.name:
-            cols_lid = lid.users_collection[0] \
-                if lid.users_collection else None
-            cutter = bsg.make_box_cutter(
-                "DispWindow_Heal", mm(float(dc["x"])),
-                mm(float(dc["y"])),
-                mm(layout["lid_closed_bottom_mm"] - 0.1),
-                mm(float(dc["w"])), mm(float(dc["h"])),
-                mm(lt + 0.2), cols_lid)
-            bsg.bool_cut(lid, cutter)
-            _update_depsgraph()
-            print("[ReportImages] lid display window was closed "
-                  "— opened it for the render scene")
-        else:
+        blocked = _lid_window_blocked(lid, cx, cy, top_z)
+        if blocked is False:
             print("[ReportImages] lid display window verified open")
-    except Exception as e:
-        print(f"[ReportImages] lid window check skipped: {e}")
+            return
+        col = lid.users_collection[0] if lid.users_collection else None
+        for solver in ("EXACT", "FAST"):
+            cutter = bsg.make_box_cutter(
+                "DispWindow_Heal",
+                x=mm(float(dc["x"]) + 0.05), y=mm(float(dc["y"]) + 0.05),
+                z=mm(closed_bottom - 1.0),
+                w=mm(float(dc["w"]) - 0.1), h=mm(float(dc["h"]) - 0.1),
+                d=mm(lt + 2.0), col=col)
+            bsg.bool_cut(lid, cutter, solver=solver)
+            _update_depsgraph()
+            if _lid_window_blocked(lid, cx, cy, top_z) is False:
+                print(f"[ReportImages] lid display window was "
+                      f"closed — opened it ({solver})")
+                return
+        print("[ReportImages] WARNING: lid display window still "
+              "blocked after two cuts — hero screen may not show")
+    except Exception as exc:
+        print(f"[ReportImages] lid window check skipped: {exc}")
 
 
 def build_scene(plan: dict) -> dict:
@@ -413,9 +453,13 @@ def build_scene(plan: dict) -> dict:
     if plan.get("has_hat"):
         spec_for_pcb = dict(spec)
         if "display_offset_x_mm" not in spec_for_pcb:
+            # Cutout is in SHELL coords; the replica wants BOARD
+            # coords (remove PCB offset, add back the 0.8 bezel).
             dc = geom.get("display_cutout", {})
-            spec_for_pcb["display_offset_x_mm"] = dc.get("x", 2.0)
-            spec_for_pcb["display_offset_y_mm"] = dc.get("y", 2.0)
+            spec_for_pcb["display_offset_x_mm"] = (
+                dc.get("x", 2.0) - geom.get("pcb_offset_x", 0.0) + 0.8)
+            spec_for_pcb["display_offset_y_mm"] = (
+                dc.get("y", 2.0) - geom.get("pcb_offset_y", 0.0) + 0.8)
         groups["hat_board"] += build_pcb_assembly(
             spec_for_pcb, geom, mm(layout["hat_z_mm"]),
             cols["hat_board"])
@@ -843,6 +887,51 @@ def apply_kit_layout(state: dict, plan: dict):
         lid = riders[0]
         record(lid)
         lid.location.x += mm(W + 18.0)
+    # Spread the electronics as part of the kit (Requirement
+    # 11): the step-1 photograph shows EVERY part the builder
+    # should have, in colour — previously it showed only the
+    # white printed parts and read as an uncoloured frame.
+    def _group_bbox(objs):
+        lo = [1e9, 1e9, 1e9]
+        hi = [-1e9, -1e9, -1e9]
+        ok = False
+        for o in objs:
+            try:
+                for corner in o.bound_box:
+                    v = o.matrix_world @ Vector(corner)
+                    for k in range(3):
+                        lo[k] = min(lo[k], v[k])
+                        hi[k] = max(hi[k], v[k])
+                    ok = True
+            except Exception:
+                continue
+        return (lo, hi) if ok else None
+
+    def spread(group, tx_mm, ty_mm):
+        objs = list(state["groups"].get(group) or [])
+        if not objs:
+            return
+        bb = _group_bbox(objs)
+        if bb is None:
+            return
+        (lo, _hi) = bb
+        dx = mm(tx_mm) - lo[0]
+        dy = mm(ty_mm) - lo[1]
+        dz = -lo[2]
+        for o in objs:
+            record(o)
+            o.location.x += dx
+            o.location.y += dy
+            o.location.z += dz
+            o.hide_render = False
+            o.hide_viewport = False
+
+    H = float(geom.get("shell_height_mm") or 35)
+    spread("host_board", -(W + 16.0), 0.0)
+    spread("hat_board", -(W + 16.0), H + 14.0)
+    spread("battery", W + 18.0, H + 14.0)
+    spread("camera", 52.0, -26.0)
+
     caps = list(state["groups"].get("button_caps") or [])
 
     def cap_x(o):

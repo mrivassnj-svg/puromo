@@ -490,6 +490,17 @@ def build_render_plan(spec: dict, geom: dict, assembly_steps: list,
             "filename": f"step_{step_index:02d}.png",
         })
 
+    # Frame 1 is the kit photograph (Requirement 11): every part
+    # of the design laid out at once — printed parts, boards,
+    # caps, battery, camera — so the first image shows the whole
+    # build in colour and matches step 1's check-against-the-BOM
+    # text. Later frames return to the cumulative assembly.
+    if frames:
+        frames[0]["visible_groups"] = [
+            g for g in GROUPS
+            if g not in banned and g not in STATE_GROUPS
+            and g not in ("cables", "inserts", "display_lid")]
+
     # The story ends on the finished, working device: if no step
     # introduced the `final` state (so no frame is flagged), upgrade
     # the last frame to the hero shot so exactly one frame — the
